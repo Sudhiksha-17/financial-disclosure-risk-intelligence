@@ -1,0 +1,31 @@
+# Data Collection
+sec-edgar-downloader>=0.5.0
+
+# LLM and Embeddings  
+transformers>=4.40.0
+torch>=2.2.0
+llama-cpp-python>=0.2.0
+sentence-transformers>=2.7.0
+
+# Vector Store
+chromadb>=0.5.0
+
+# Financial Data
+yfinance>=0.2.40
+pandas>=2.2.0
+numpy>=1.26.0
+
+# Statistical Analysis
+scipy>=1.13.0
+statsmodels>=0.14.0
+scikit-learn>=1.4.0
+
+# Visualization
+plotly>=5.22.0
+streamlit>=1.35.0
+
+# Utilities
+python-dotenv>=1.0.0
+tqdm>=4.66.0
+pydantic>=2.7.0
+loguru>=0.7.0
