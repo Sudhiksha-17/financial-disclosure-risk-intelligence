@@ -1,0 +1,36 @@
+# Data files - never commit raw financial data
+data/raw/
+data/processed/
+*.csv
+*.parquet
+*.json
+*.pkl
+
+# Environment
+.env
+.env.local
+__pycache__/
+*.pyc
+*.pyo
+.Python
+env/
+venv/
+*.egg-info/
+
+# Models
+models/
+*.pt
+*.bin
+
+# Outputs
+outputs/
+*.html
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/
