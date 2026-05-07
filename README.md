@@ -168,8 +168,7 @@ python src/ingestion/edgar_downloader.py
 
 This section documents real problems encountered during development
 and the decisions made to address them. It exists because honest
-documentation of engineering tradeoffs is more valuable than a
-polished facade.
+documentation of engineering tradeoffs is more valuable for replication or for debugging in the future
 
 ---
 
