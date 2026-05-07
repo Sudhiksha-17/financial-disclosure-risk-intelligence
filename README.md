@@ -162,6 +162,90 @@ python src/ingestion/edgar_downloader.py
 
 ---
 
+---
+
+## Engineering Notes
+
+This section documents real problems encountered during development
+and the decisions made to address them. It exists because honest
+documentation of engineering tradeoffs is more valuable than a
+polished facade.
+
+---
+
+### Problem 1: Raw Filing Size at Scale (May 2026)
+
+**What happened:**
+Initial pipeline downloaded full 10-K and 10-Q filings for 45
+companies across 2019 to 2024 using `sec-edgar-downloader`. Total
+raw download size reached 22.6GB, exceeding available local disk
+space before extraction could complete.
+
+**Root cause:**
+Full EDGAR filings include financial statements, exhibits, legal
+documents, and appendices in addition to the narrative sections.
+We only need Item 1A (Risk Factors), which is typically 8KB to
+50KB per filing. Downloading the full filing to extract 0.1% of
+its content is wasteful at scale.
+
+**Decision:**
+Adopted a batch processing approach rather than redesigning the
+ingestion architecture mid-stream. Process one sector at a time:
+download sector, extract Item 1A, delete raw files, move to next
+sector. This keeps peak disk usage under 8GB at any point while
+preserving the existing pipeline code.
+
+**Future improvement:**
+Production version should use the SEC EDGAR Full Text Search API
+to fetch only the Item 1A section directly, eliminating the raw
+download step entirely. This is the approach used by institutional
+financial data pipelines and would reduce total disk usage from
+~50GB to ~200MB for the full 100-company dataset.
+
+---
+
+### Problem 2: sec-edgar-downloader v5.x API Change (May 2026)
+
+**What happened:**
+Initial code used `Downloader(company_name, email_address, save_path)`
+constructor which threw `TypeError: unexpected keyword argument 'save_path'`
+on first run.
+
+**Root cause:**
+`sec-edgar-downloader` v5.x changed the constructor signature,
+removing the `save_path` parameter. Files are now saved to
+`sec-edgar-filings/` in the current working directory by default.
+
+**Fix:**
+Updated constructor to `Downloader(company_name, email_address)`
+and added `download_details=True` to the `dl.get()` call as
+required by v5.x. Updated `OUTPUT_DIR` reference to match new
+default save path.
+
+**Lesson:**
+Pin dependency versions in `requirements.txt` to avoid silent
+breaking changes. Updated to `sec-edgar-downloader==5.1.0`.
+
+---
+
+### Problem 3: Windows PowerShell Compatibility (May 2026)
+
+**What happened:**
+Setup commands using Unix `touch` and `mkdir -p` failed on
+Windows PowerShell with `CommandNotFoundException`.
+
+**Fix:**
+Replaced all Unix commands with PowerShell equivalents.
+Used `New-Item -ItemType File -Force` instead of `touch` and
+`New-Item -ItemType Directory -Force` instead of `mkdir -p`.
+Added a PowerShell setup script `scripts/setup_windows.ps1`
+for reproducibility.
+
+**Note for contributors:**
+This project was developed on Windows. All shell commands in
+this README use PowerShell syntax. Unix/Mac equivalents are
+standard bash commands.
+
 ## Author
 
 **Sudhiksha Kandavel Rajan**  
