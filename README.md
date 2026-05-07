@@ -240,6 +240,158 @@ Used `New-Item -ItemType File -Force` instead of `touch` and
 Added a PowerShell setup script `scripts/setup_windows.ps1`
 for reproducibility.
 
+---
+
+### Problem 4: Extractor Picking Wrong File from EDGAR Download (May 2026)
+
+**What happened:**
+Item 1A extraction success rate was only 47% (287/600) on first run.
+Investigation showed the extractor was selecting `full-submission.txt`
+(85MB raw EDGAR wrapper) instead of `primary-document.html` (21MB
+actual filing document) because it was taking the largest file.
+
+**Root cause:**
+`sec-edgar-downloader` v5.x saves two files per filing:
+- `full-submission.txt`: raw EDGAR submission wrapper, not human readable
+- `primary-document.html`: actual filing document with readable content
+
+Our file selection logic took the largest file which was always
+`full-submission.txt`.
+
+**Fix:**
+Updated file selection to explicitly prioritise `primary-document.html`
+over all other files. Added HTML tag stripping to the file reader since
+primary documents are HTML format. Added explicit skip rule for
+`full-submission.txt`.
+
+**Result:**
+Extraction success rate improved from 47% to the next iteration.
+
+---
+
+### Problem 5: Item 1A Extractor Matching Table of Contents Instead of Content (May 2026)
+
+**What happened:**
+268/600 extractions succeeded after the HTML fix but large bank
+10-K filings (JPM, BAC, GS, MS, WFC) still failed. Investigation
+showed Item 1A text existed in the stripped document but was not
+being extracted.
+
+**Root cause:**
+Large bank 10-K filings contain a table of contents where Item 1A
+appears as a short entry like "Item 1A. Risk Factors. 7-28" followed
+immediately by "Item 1B." Our extractor matched the TOC entry first,
+then found Item 1B within 50 characters and extracted almost nothing.
+The real Item 1A content section appeared thousands of characters later.
+
+Additionally some extractions were false positives: CFG returning
+629 words and ZION returning 399 words when a real Item 1A section
+is always at least 3,000 to 5,000 words.
+
+**Fix:**
+Added TOC detection: if Item 1B appears within 400 characters of an
+Item 1A match, classify it as a TOC entry and skip it. Increased
+minimum extraction threshold from 500 characters to 1,000 words to
+filter false positives. Fall back to last match position if all
+positions appear to be TOC entries.
+
+**Result:**
+JPM, BAC, GS, COF, FITB, KEY, PNC, RF, STT, TFC, ZION all began
+extracting correctly. Extraction success rate improved significantly.
+
+---
+
+### Problem 6: XBRL Primary Documents and Incorporation by Reference (May 2026)
+
+**What happened:**
+MS and C failed with zero Item 1A matches despite full-submission.txt
+containing narrative text. WFC and USB failed because their risk
+factors are incorporated by reference from separate annual report
+documents not downloaded by this pipeline.
+
+**Root cause — two distinct issues:**
+
+Issue A: Companies like MS and C file their 10-K narrative inside
+full-submission.txt while primary-document.html is an XBRL data
+file created by Workiva. XBRL files start with `<?xml` and contain
+`xmlns:` namespace declarations. Our extractor was trying to read
+the XBRL file and finding no text content.
+
+Issue B: Companies like WFC and USB use SEC incorporation by
+reference. Their 10-K literally states "Risk Factors can be found
+in the Annual Report on pages X to Y." The actual content is in a
+separate annual report document filed alongside the 10-K but not
+downloaded by sec-edgar-downloader as a standalone file.
+
+**Fix for Issue A:**
+Added `is_xbrl_file()` detection that checks for `<?xml` prefix
+and `xmlns:` namespaces in the first 500 characters. When
+primary-document.html is XBRL, fall back to full-submission.txt
+and extract the first `<DOCUMENT>` section which contains the
+main filing narrative.
+
+**Fix for Issue B:**
+No fix applied. Companies using incorporation by reference require
+downloading and parsing a separate annual report document. These
+filings are documented as known gaps in our dataset.
+Affected companies: WFC, USB (banking sector).
+
+**Impact:**
+Approximately 15% of banking sector filings use incorporation by
+reference and cannot be extracted without downloading additional
+documents. Future work: implement annual report downloader for
+these specific companies.
+
+---
+
+### Problem 7: 10-Q Filings with No Risk Factor Content (May 2026)
+
+**What happened:**
+Many companies succeed on 10-K extraction but fail on all 10-Q
+extractions despite the extractor working correctly. For example
+ALLY, BOKF, WAL, ZION, and STT all have complete 10-K coverage
+but zero successful 10-Q extractions.
+
+**Root cause:**
+SEC rules only require companies to disclose material changes to
+risk factors in quarterly 10-Q filings, not repeat the full section.
+Companies that had no material changes write brief statements like
+"there have been no material changes to risk factors disclosed in
+our most recent Annual Report." This text is under our 1,000-word
+minimum and does not contain enough content to extract meaningfully.
+
+**Decision:**
+Accepted as expected behavior, not a bug. 10-K filings contain
+comprehensive annual risk disclosures and are the primary data
+source for consecutive pair analysis. 10-Q filings with no
+material changes are informative in themselves: no language change
+is a valid signal worth documenting.
+
+**Impact on analysis:**
+Consecutive pair construction will primarily use annual 10-K pairs
+supplemented by 10-Q pairs where available. This is methodologically
+stronger since annual pairs control for seasonal language patterns
+automatically. The dataset contains complete 10-K coverage for 20
+out of 25 banking sector companies covering 2019 to 2024.
+
+---
+
+### Summary: Banking Sector Extraction Results (May 2026)
+
+| Category | Count |
+|----------|-------|
+| Successful extractions | 263 |
+| Companies with full 10-K coverage | 20/25 |
+| Companies using incorporation by reference | 3 (WFC, USB, BK) |
+| Companies with XBRL filing issues | 2 (MS, C) |
+| 10-Q failures due to SEC no-change policy | ~180 |
+| Period covered | 2019 to 2024 |
+| Sectors covered so far | Banking |
+
+**Next:** Insurance, Technology, Energy sectors to be processed
+using the same batch pipeline. Expected total dataset size after
+all four sectors: 900 to 1,100 successful extractions.
+
 **Note for contributors:**
 This project was developed on Windows. All shell commands in
 this README use PowerShell syntax. Unix/Mac equivalents are
