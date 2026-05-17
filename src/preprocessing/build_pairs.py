@@ -1,32 +1,27 @@
 """
-Filing Pair Constructor
-========================
-Takes extracted Item 1A JSON files and constructs consecutive
-same-quarter filing pairs for each company.
+LLM Risk Language Shift Detector
+==================================
+Analyzes consecutive SEC filing pairs to detect shifts in
+risk factor language across 5 dimensions using Llama-3 8B
+via Ollama.
 
-For each company we pair:
-- 10-K 2019 with 10-K 2020 (year-over-year annual pairs)
-- 10-K 2020 with 10-K 2021
-- etc.
-
-And for 10-Q where available:
-- Q1 2019 with Q1 2020
-- Q2 2019 with Q2 2020
-- etc.
-
-Same-quarter pairing controls for seasonal language patterns.
-
-Output: one JSON file per pair with both texts and metadata.
+For each filing pair, produces:
+- Direction: escalating, stable, or de-escalating
+- Intensity: 1 to 5
+- Justification: one sentence explanation
 
 Usage:
-    python src/preprocessing/build_pairs.py
+    python src/modeling/risk_detector.py
+    python src/modeling/risk_detector.py --limit 10  # test run
 """
 
 import json
+import time
 import logging
+import argparse
+import requests
 from pathlib import Path
 from datetime import datetime
-from collections import defaultdict
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -37,296 +32,370 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("outputs/pairs_log.txt")
+        logging.FileHandler("outputs/detection_log.txt")
     ]
 )
 logger = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-PROCESSED_DIR = Path("data/processed/item1a")
-PAIRS_DIR     = Path("data/processed/pairs")
+PAIRS_DIR    = Path("data/processed/pairs")
+RESULTS_DIR  = Path("data/processed/risk_signals")
+OLLAMA_URL   = "http://localhost:11434/api/generate"
+MODEL        = "llama3"
 
-# Minimum word count for both texts in a pair
-MIN_WORD_COUNT = 1000
+RISK_DIMENSIONS = [
+    "liquidity_risk",
+    "credit_risk",
+    "operational_risk",
+    "market_risk",
+    "regulatory_risk"
+]
+
+MAX_WORDS_PER_TEXT = 2000
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Text truncator ────────────────────────────────────────────────────────────
 
-def extract_year_from_accession(accession: str) -> int | None:
+def truncate_text(text: str, max_words: int = MAX_WORDS_PER_TEXT) -> str:
     """
-    Extract filing year from EDGAR accession number.
-    Format: XXXXXXXXXX-YY-XXXXXX where YY is 2-digit year.
-    Example: 0000019617-19-000054 -> 2019
+    Truncate text to max_words words.
+    Takes first half and last half to preserve both
+    introduction and conclusion of risk section.
     """
-    try:
-        parts = accession.split("-")
-        if len(parts) >= 2:
-            year_2digit = int(parts[1])
-            return (
-                2000 + year_2digit
-                if year_2digit < 50
-                else 1900 + year_2digit
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+
+    half       = max_words // 2
+    first_half = " ".join(words[:half])
+    last_half  = " ".join(words[-half:])
+    return first_half + " [...] " + last_half
+
+
+# ── Prompt builder ────────────────────────────────────────────────────────────
+
+def build_prompt(
+    ticker: str,
+    year_earlier: int,
+    year_later: int,
+    text_earlier: str,
+    text_later: str
+) -> str:
+    """
+    Build structured prompt for risk language shift detection.
+    Instructs Llama-3 to output valid JSON only.
+    """
+    text_e = truncate_text(text_earlier)
+    text_l = truncate_text(text_later)
+
+    prompt = f"""You are a financial risk analyst comparing two consecutive annual reports from {ticker}.
+
+EARLIER FILING ({year_earlier} Risk Factors):
+{text_e}
+
+LATER FILING ({year_later} Risk Factors):
+{text_l}
+
+Analyze how the risk language changed between these two filings across exactly these 5 dimensions:
+1. liquidity_risk: Cash, funding, and liquidity concerns
+2. credit_risk: Borrower default, counterparty, and credit quality concerns
+3. operational_risk: Systems, processes, people, and operational failures
+4. market_risk: Market volatility, interest rates, and price risks
+5. regulatory_risk: Regulatory changes, compliance, and legal risks
+
+For each dimension output EXACTLY this JSON structure with no additional text:
+
+{{
+  "liquidity_risk": {{
+    "direction": "escalating" or "stable" or "de-escalating",
+    "intensity": 1 to 5 integer where 1=minimal change 5=major change,
+    "justification": "one sentence explaining the key language change"
+  }},
+  "credit_risk": {{
+    "direction": "escalating" or "stable" or "de-escalating",
+    "intensity": 1 to 5 integer,
+    "justification": "one sentence explaining the key language change"
+  }},
+  "operational_risk": {{
+    "direction": "escalating" or "stable" or "de-escalating",
+    "intensity": 1 to 5 integer,
+    "justification": "one sentence explaining the key language change"
+  }},
+  "market_risk": {{
+    "direction": "escalating" or "stable" or "de-escalating",
+    "intensity": 1 to 5 integer,
+    "justification": "one sentence explaining the key language change"
+  }},
+  "regulatory_risk": {{
+    "direction": "escalating" or "stable" or "de-escalating",
+    "intensity": 1 to 5 integer,
+    "justification": "one sentence explaining the key language change"
+  }}
+}}
+
+Respond with ONLY the JSON object. No preamble, no explanation, no markdown."""
+
+    return prompt
+
+
+# ── Ollama caller ─────────────────────────────────────────────────────────────
+
+def call_ollama(prompt: str, retries: int = 3) -> str | None:
+    """
+    Call Ollama API with the given prompt.
+    Returns model response text or None on failure.
+    """
+    payload = {
+        "model":  MODEL,
+        "prompt": prompt,
+        "stream": False,
+        "options": {
+            "temperature": 0,
+            "num_predict": 1500,
+            "top_p": 1,
+            "seed": 42
+        }
+    }
+
+    for attempt in range(retries):
+        try:
+            response = requests.post(
+                OLLAMA_URL,
+                json=payload,
+                timeout=120
             )
-    except Exception:
-        pass
+            response.raise_for_status()
+            return response.json().get("response", "")
+
+        except requests.exceptions.Timeout:
+            logger.warning(f"Timeout on attempt {attempt + 1}/{retries}")
+            time.sleep(5)
+
+        except requests.exceptions.ConnectionError:
+            logger.error("Cannot connect to Ollama. Is it running?")
+            logger.error("Start with: ollama serve")
+            return None
+
+        except Exception as e:
+            logger.warning(f"Attempt {attempt + 1} failed: {e}")
+            time.sleep(2)
+
     return None
 
 
-def get_quarter(month: int) -> str:
-    """Return quarter label for a given month number."""
-    if month <= 3:
-        return "Q1"
-    elif month <= 6:
-        return "Q2"
-    elif month <= 9:
-        return "Q3"
-    else:
-        return "Q4"
+# ── Response parser ───────────────────────────────────────────────────────────
 
-
-# ── Pair builder ──────────────────────────────────────────────────────────────
-
-def build_pairs_for_company(
-    ticker: str,
-    filings: list[dict]
-) -> list[dict]:
+def parse_response(response_text: str) -> dict | None:
     """
-    Build consecutive same-quarter filing pairs for a single company.
-
-    Strategy:
-    1. Separate filings by type (10-K vs 10-Q)
-    2. For 10-K: sort by year, pair consecutive years
-    3. For 10-Q: group by quarter, pair consecutive years
-       within the same quarter group
-
-    Returns list of pair dicts.
+    Parse JSON response from Llama-3.
+    Handles common formatting issues like markdown code blocks.
     """
-    pairs = []
+    if not response_text:
+        return None
 
-    annual_filings    = []
-    quarterly_filings = []
+    text = response_text.strip()
 
-    for filing in filings:
-        filing_type = filing.get("filing_type", "")
-        accession   = filing.get("filing_date", "")
-        year        = extract_year_from_accession(accession)
+    # Strip markdown code blocks if present
+    if text.startswith("```"):
+        lines = text.split("\n")
+        text  = "\n".join(lines[1:-1])
 
-        if year is None:
-            continue
+    # Find JSON object boundaries
+    start = text.find("{")
+    end   = text.rfind("}") + 1
 
-        if filing_type == "10-K":
-            annual_filings.append({
-                "year":   year,
-                "filing": filing
-            })
+    if start == -1 or end == 0:
+        return None
 
-        elif filing_type == "10-Q":
-            try:
-                extracted = datetime.fromisoformat(
-                    filing.get("extracted_at", "")
-                )
-                quarter = get_quarter(extracted.month)
-            except Exception:
-                continue
+    json_str = text[start:end]
 
-            quarterly_filings.append({
-                "year":    year,
-                "quarter": quarter,
-                "filing":  filing
-            })
+    try:
+        parsed = json.loads(json_str)
 
-    # ── Annual pairs (10-K) ───────────────────────────────────────────────────
+        # Validate all dimensions present and correct
+        for dim in RISK_DIMENSIONS:
+            if dim not in parsed:
+                return None
 
-    annual_sorted = sorted(annual_filings, key=lambda x: x["year"])
+            dim_data = parsed[dim]
 
-    for i in range(len(annual_sorted) - 1):
-        earlier_item = annual_sorted[i]
-        later_item   = annual_sorted[i + 1]
+            if not all(
+                k in dim_data
+                for k in ["direction", "intensity", "justification"]
+            ):
+                return None
 
-        earlier = earlier_item["filing"]
-        later   = later_item["filing"]
+            if dim_data["direction"] not in [
+                "escalating", "stable", "de-escalating"
+            ]:
+                return None
 
-        if (earlier.get("word_count", 0) < MIN_WORD_COUNT or
-                later.get("word_count", 0) < MIN_WORD_COUNT):
-            continue
+            # Coerce intensity to int if needed
+            if not isinstance(dim_data["intensity"], int):
+                dim_data["intensity"] = int(dim_data["intensity"])
 
-        year_e = earlier_item["year"]
-        year_l = later_item["year"]
+            if not 1 <= dim_data["intensity"] <= 5:
+                return None
 
-        pairs.append({
-            "pair_id":      f"{ticker}_10-K_{year_e}_{year_l}",
-            "ticker":       ticker,
-            "filing_type":  "10-K",
-            "period":       "annual",
-            "year_earlier": year_e,
-            "year_later":   year_l,
-            "earlier": {
-                "filing_date": earlier.get("filing_date"),
-                "word_count":  earlier.get("word_count"),
-                "text":        earlier.get("text"),
-                "source_file": earlier.get("source_file")
-            },
-            "later": {
-                "filing_date": later.get("filing_date"),
-                "word_count":  later.get("word_count"),
-                "text":        later.get("text"),
-                "source_file": later.get("source_file")
-            },
-            "created_at": datetime.now().isoformat()
-        })
+        return parsed
 
-    # ── Quarterly pairs (10-Q) ────────────────────────────────────────────────
-
-    by_quarter = defaultdict(list)
-    for item in quarterly_filings:
-        by_quarter[item["quarter"]].append(item)
-
-    for quarter, items in by_quarter.items():
-        items_sorted = sorted(items, key=lambda x: x["year"])
-
-        for i in range(len(items_sorted) - 1):
-            earlier_item = items_sorted[i]
-            later_item   = items_sorted[i + 1]
-
-            earlier = earlier_item["filing"]
-            later   = later_item["filing"]
-
-            if (earlier.get("word_count", 0) < MIN_WORD_COUNT or
-                    later.get("word_count", 0) < MIN_WORD_COUNT):
-                continue
-
-            year_e = earlier_item["year"]
-            year_l = later_item["year"]
-
-            pairs.append({
-                "pair_id":      f"{ticker}_10-Q_{quarter}_{year_e}_{year_l}",
-                "ticker":       ticker,
-                "filing_type":  "10-Q",
-                "period":       quarter,
-                "year_earlier": year_e,
-                "year_later":   year_l,
-                "earlier": {
-                    "filing_date": earlier.get("filing_date"),
-                    "word_count":  earlier.get("word_count"),
-                    "text":        earlier.get("text"),
-                    "source_file": earlier.get("source_file")
-                },
-                "later": {
-                    "filing_date": later.get("filing_date"),
-                    "word_count":  later.get("word_count"),
-                    "text":        later.get("text"),
-                    "source_file": later.get("source_file")
-                },
-                "created_at": datetime.now().isoformat()
-            })
-
-    return pairs
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return None
 
 
 # ── Main pipeline ─────────────────────────────────────────────────────────────
 
-def run_pair_construction() -> None:
+def run_detection_pipeline(limit: int = None) -> None:
     """
-    Load all extracted Item 1A JSONs, group by company,
-    and construct consecutive same-quarter filing pairs.
-    Skips pairs that already exist.
+    Run LLM risk detection on all 10-K filing pairs.
+    Skips pairs already processed.
+    Resumes automatically if interrupted.
     """
-    PAIRS_DIR.mkdir(parents=True, exist_ok=True)
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    if not PROCESSED_DIR.exists():
-        logger.error(f"Processed dir not found: {PROCESSED_DIR}")
-        logger.error("Run extract_item1a.py first")
+    pair_files = list(PAIRS_DIR.glob("*.json"))
+
+    if not pair_files:
+        logger.error(f"No pairs found in {PAIRS_DIR}")
+        logger.error("Run build_pairs.py first")
         return
 
-    all_files = list(PROCESSED_DIR.glob("*.json"))
+    # Filter to 10-K pairs only for initial run
+    pair_files = [
+        f for f in pair_files
+        if "_10-K_" in f.name
+    ]
+
+    if limit:
+        pair_files = pair_files[:limit]
+
+    total   = len(pair_files)
+    success = 0
+    failed  = 0
+    skipped = 0
 
     logger.info("=" * 60)
-    logger.info("Filing Pair Constructor")
-    logger.info(f"Input files  : {len(all_files)}")
-    logger.info(f"Output dir   : {PAIRS_DIR}")
-    logger.info(f"Min words    : {MIN_WORD_COUNT}")
+    logger.info("LLM Risk Language Shift Detector")
+    logger.info(f"Model      : {MODEL} via Ollama")
+    logger.info(f"Pairs      : {total} (10-K annual pairs)")
+    logger.info(f"Output dir : {RESULTS_DIR}")
+    if limit:
+        logger.info(f"LIMIT      : {limit} pairs (test mode)")
     logger.info("=" * 60)
 
-    if not all_files:
-        logger.error("No extracted filings found")
+    # Verify Ollama is running
+    try:
+        requests.get("http://localhost:11434", timeout=5)
+    except Exception:
+        logger.error("Ollama is not running.")
+        logger.error("Start it with: ollama serve")
         return
 
-    # Load and group all filings by ticker
-    filings_by_ticker = defaultdict(list)
+    start_time = datetime.now()
 
-    for filepath in all_files:
+    for i, pair_file in enumerate(sorted(pair_files), 1):
+        pair_id     = pair_file.stem
+        output_path = RESULTS_DIR / f"{pair_id}_signals.json"
+
+        # Skip if already processed
+        if output_path.exists():
+            skipped += 1
+            continue
+
+        # Load pair
         try:
-            data = json.loads(
-                filepath.read_text(encoding="utf-8")
+            pair = json.loads(
+                pair_file.read_text(encoding="utf-8")
             )
-            ticker = data.get("ticker", "")
-            if ticker:
-                filings_by_ticker[ticker].append(data)
         except Exception as e:
-            logger.warning(f"Could not load {filepath.name}: {e}")
+            logger.warning(f"Could not load {pair_file.name}: {e}")
+            failed += 1
+            continue
 
-    logger.info(f"Companies loaded: {len(filings_by_ticker)}")
+        ticker       = pair.get("ticker", "")
+        year_earlier = pair.get("year_earlier", "")
+        year_later   = pair.get("year_later", "")
+        text_earlier = pair.get("earlier", {}).get("text", "")
+        text_later   = pair.get("later", {}).get("text", "")
 
-    # Build pairs for each company
-    total_pairs   = 0
-    skip_count    = 0
-    company_stats = []
+        if not text_earlier or not text_later:
+            logger.warning(f"Missing text: {pair_id}")
+            failed += 1
+            continue
 
-    for ticker, filings in sorted(filings_by_ticker.items()):
-        pairs = build_pairs_for_company(ticker, filings)
+        # Progress with ETA
+        elapsed = max((datetime.now() - start_time).seconds, 1)
+        rate    = success / elapsed * 60 if success > 0 else 2
+        eta_min = (total - i) / max(rate, 0.1)
 
-        company_new  = 0
-        company_skip = 0
+        logger.info(
+            f"[{i}/{total}] {ticker} {year_earlier}->{year_later} "
+            f"| {success} done | ETA ~{eta_min:.0f}min"
+        )
 
-        for pair in pairs:
-            output_path = PAIRS_DIR / f"{pair['pair_id']}.json"
+        # Build prompt and call model
+        prompt   = build_prompt(
+            ticker, year_earlier, year_later,
+            text_earlier, text_later
+        )
+        response = call_ollama(prompt)
 
-            if output_path.exists():
-                company_skip += 1
-                skip_count   += 1
-                continue
+        if response is None:
+            logger.warning(f"No response for {pair_id}")
+            failed += 1
+            continue
 
-            output_path.write_text(
-                json.dumps(pair, indent=2, ensure_ascii=False),
-                encoding="utf-8"
+        # Parse and validate response
+        signals = parse_response(response)
+
+        if signals is None:
+            logger.warning(
+                f"Could not parse response for {pair_id}: "
+                f"{response[:300]}"
             )
-            company_new += 1
-            total_pairs += 1
+            failed += 1
+            continue
 
-        if company_new > 0 or company_skip > 0:
-            logger.info(
-                f"OK  {ticker:8s} | "
-                f"{len(filings):3d} filings | "
-                f"{company_new:3d} new pairs | "
-                f"{company_skip:2d} skipped"
-            )
-
-        company_stats.append({
+        # Save result
+        result = {
+            "pair_id":      pair_id,
             "ticker":       ticker,
-            "filing_count": len(filings),
-            "new_pairs":    company_new,
-            "skipped":      company_skip
-        })
+            "filing_type":  pair.get("filing_type"),
+            "year_earlier": year_earlier,
+            "year_later":   year_later,
+            "signals":      signals,
+            "raw_response": response,
+            "processed_at": datetime.now().isoformat()
+        }
+
+        output_path.write_text(
+            json.dumps(result, indent=2, ensure_ascii=False),
+            encoding="utf-8"
+        )
+        success += 1
 
     # ── Summary ───────────────────────────────────────────────────────────────
 
+    total_elapsed = datetime.now() - start_time
+
     logger.info("\n" + "=" * 60)
-    logger.info("PAIR CONSTRUCTION COMPLETE")
-    logger.info(f"New pairs created  : {total_pairs}")
-    logger.info(f"Pairs skipped      : {skip_count} (already exist)")
-    logger.info(f"Companies processed: {len(filings_by_ticker)}")
+    logger.info("DETECTION COMPLETE")
+    logger.info(f"Successful : {success}")
+    logger.info(f"Failed     : {failed}")
+    logger.info(f"Skipped    : {skipped} (already processed)")
+    logger.info(f"Total time : {total_elapsed}")
     logger.info("=" * 60)
 
-    # Save summary
-    summary_path = Path("outputs/pairs_summary.json")
+    summary_path = Path("outputs/detection_summary.json")
     summary_path.write_text(
         json.dumps({
-            "run_at":        datetime.now().isoformat(),
-            "total_new":     total_pairs,
-            "total_skipped": skip_count,
-            "company_count": len(filings_by_ticker),
-            "companies":     company_stats
+            "run_at":     datetime.now().isoformat(),
+            "model":      MODEL,
+            "success":    success,
+            "failed":     failed,
+            "skipped":    skipped,
+            "total_time": str(total_elapsed)
         }, indent=2),
         encoding="utf-8"
     )
@@ -336,7 +405,15 @@ def run_pair_construction() -> None:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    start_time = datetime.now()
-    run_pair_construction()
-    elapsed = datetime.now() - start_time
-    logger.info(f"Total elapsed time: {elapsed}")
+    parser = argparse.ArgumentParser(
+        description="LLM Risk Language Shift Detector"
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Limit number of pairs to process (for testing)"
+    )
+    args = parser.parse_args()
+
+    run_detection_pipeline(limit=args.limit)
