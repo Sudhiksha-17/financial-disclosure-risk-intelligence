@@ -1,5 +1,5 @@
 # Data Collection
-sec-edgar-downloader>=0.5.0
+sec-edgar-downloader==5.1.0
 
 # LLM and Embeddings  
 transformers>=4.40.0

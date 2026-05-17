@@ -5,19 +5,27 @@ Downloads 10-K and 10-Q filings for target companies
 across 4 sectors: banking, insurance, technology, energy.
 
 Version: compatible with sec-edgar-downloader 5.x
+Dataset: 100 companies, 25 per sector, 2019-2024
 
 Usage:
+    # Run all sectors
     python src/ingestion/edgar_downloader.py
+
+    # Run a single sector
+    python src/ingestion/edgar_downloader.py banking
+    python src/ingestion/edgar_downloader.py insurance
+    python src/ingestion/edgar_downloader.py technology
+    python src/ingestion/edgar_downloader.py energy
 """
 
-import os
+import sys
 import time
 import logging
 from pathlib import Path
 from datetime import datetime
 from sec_edgar_downloader import Downloader
 
-# ── Logging setup ────────────────────────────────────────────────────────────
+# ── Logging setup ─────────────────────────────────────────────────────────────
 
 Path("outputs").mkdir(exist_ok=True)
 
@@ -31,36 +39,46 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ── Company universe ─────────────────────────────────────────────────────────
+# ── Company universe: 100 companies across 4 sectors ─────────────────────────
 
 COMPANIES = {
     "banking": [
-        "JPM", "BAC", "WFC", "GS", "MS",
-        "C", "USB", "PNC", "TFC", "COF",
-        "BK", "STT", "FITB", "RF", "HBAN"
+    "JPM",  "BAC",  "WFC",  "GS",   "MS",
+    "C",    "USB",  "PNC",  "TFC",  "COF",
+    "BK",   "STT",  "FITB", "RF",   "HBAN",
+    "ALLY", "CFG",  "NTRS", "ZION", "BOKF",
+    "FHN",  "IBOC", "WAL",  "KEY",  "MTB"
     ],
     "insurance": [
-        "MET", "PRU", "AFL", "TRV", "ALL",
-        "CB", "AIG", "HIG", "LNC", "UNM"
+        "MET",  "PRU",  "AFL",  "TRV",  "ALL",
+        "CB",   "AIG",  "HIG",  "LNC",  "UNM",
+        "PGR",  "CNA",  "RLI",  "CINF", "AIZ",
+        "GL",   "EQH",  "BHF",  "ERIE", "KMPR",
+        "THG",  "WRB",  "RNR",  "ACGL", "MLK"
     ],
     "technology": [
-        "AAPL", "MSFT", "GOOGL", "META", "AMZN",
-        "NVDA", "INTC", "IBM", "ORCL", "CRM"
+        "AAPL", "MSFT", "GOOGL","META", "AMZN",
+        "NVDA", "INTC", "IBM",  "ORCL", "CRM",
+        "ADBE", "NOW",  "SNOW", "PLTR", "PANW",
+        "CRWD", "ZS",   "OKTA", "DDOG", "NET",
+        "TWLO", "HUBS", "ESTC", "CFLT", "MDB"
     ],
     "energy": [
-        "XOM", "CVX", "COP", "EOG", "SLB",
-        "PSX", "VLO", "MPC", "OXY", "HAL"
+        "XOM",  "CVX",  "COP",  "EOG",  "SLB",
+        "PSX",  "VLO",  "MPC",  "OXY",  "HAL",
+        "PXD",  "DVN",  "FANG", "MRO",  "APA",
+        "HES",  "BKR",  "NOV",  "HP",   "WHD",
+        "MTDR", "SM",   "CIVI", "CPE",  "PR"
     ]
 }
 
-# ── Config ───────────────────────────────────────────────────────────────────
+# ── Config ────────────────────────────────────────────────────────────────────
 
 START_DATE   = "2019-01-01"
 END_DATE     = "2024-12-31"
 FILING_TYPES = ["10-K", "10-Q"]
 
-# SEC fair access policy: max 10 requests per second
-# We stay well below that to be safe
+# SEC fair access policy: stay well below 10 requests per second
 SLEEP_BETWEEN_TICKERS = 2.0  # seconds
 
 
@@ -76,9 +94,9 @@ def download_filings(
     Returns a summary dict of results.
     """
     results = {
-        "ticker": ticker,
-        "sector": sector,
-        "status": {}
+        "ticker":  ticker,
+        "sector":  sector,
+        "status":  {}
     }
 
     for filing_type in FILING_TYPES:
@@ -102,33 +120,34 @@ def download_filings(
 
 # ── Main pipeline ─────────────────────────────────────────────────────────────
 
-def run_download_pipeline() -> None:
+def run_download_pipeline(companies: dict = None) -> None:
     """
-    Download all filings for all companies across all sectors.
+    Download all filings for all companies in the given dict.
+    Defaults to the full COMPANIES universe if none provided.
     Logs progress and writes a summary report on completion.
     """
-    # In sec-edgar-downloader v5.x files are saved to
-    # sec-edgar-filings/ in your current working directory
+    if companies is None:
+        companies = COMPANIES
+
     logger.info("=" * 60)
     logger.info("SEC EDGAR Filing Download Pipeline")
     logger.info(f"Period    : {START_DATE} to {END_DATE}")
-    logger.info(f"Sectors   : {list(COMPANIES.keys())}")
-    logger.info(f"Tickers   : {sum(len(v) for v in COMPANIES.values())} total")
+    logger.info(f"Sectors   : {list(companies.keys())}")
+    logger.info(f"Tickers   : {sum(len(v) for v in companies.values())} total")
     logger.info(f"Save path : ./sec-edgar-filings/")
     logger.info("=" * 60)
 
     # Initialise downloader
-    # v5.x only takes company_name and email_address
     dl = Downloader(
         company_name="Sudhiksha Kandavel Rajan",
         email_address="kandavelrajan.s@northeastern.edu"
     )
 
     all_results = []
-    total = sum(len(v) for v in COMPANIES.values())
+    total = sum(len(v) for v in companies.values())
     count = 0
 
-    for sector, tickers in COMPANIES.items():
+    for sector, tickers in companies.items():
         logger.info(f"\n── Sector: {sector.upper()} ──")
 
         for ticker in tickers:
@@ -161,7 +180,7 @@ def run_download_pipeline() -> None:
     logger.info(f"Log saved  : outputs/download_log.txt")
     logger.info("=" * 60)
 
-    # Write any failed tickers to a retry file
+    # Write failed tickers to retry file
     failed = [
         f"{r['ticker']} ({r['sector']}): {r['status']}"
         for r in all_results
@@ -172,7 +191,7 @@ def run_download_pipeline() -> None:
         retry_path = Path("outputs/failed_tickers.txt")
         retry_path.write_text("\n".join(failed))
         logger.info(f"Failed tickers saved to: {retry_path}")
-        logger.info("Re-run the script to retry failed tickers")
+        logger.info("Re-run with the same sector argument to retry")
     else:
         logger.info("All tickers downloaded successfully")
 
@@ -180,7 +199,26 @@ def run_download_pipeline() -> None:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+
+    # Optional: pass sector name as argument for batch processing
+    # Example: python src/ingestion/edgar_downloader.py banking
+    # Default: runs all sectors
+
+    sector_filter = sys.argv[1] if len(sys.argv) > 1 else None
+
+    if sector_filter and sector_filter not in COMPANIES:
+        logger.error(f"Unknown sector: {sector_filter}")
+        logger.error(f"Available sectors: {list(COMPANIES.keys())}")
+        sys.exit(1)
+
+    if sector_filter:
+        logger.info(f"Running single sector: {sector_filter}")
+        companies_to_run = {sector_filter: COMPANIES[sector_filter]}
+    else:
+        logger.info("Running all sectors")
+        companies_to_run = COMPANIES
+
     start_time = datetime.now()
-    run_download_pipeline()
+    run_download_pipeline(companies_to_run)
     elapsed = datetime.now() - start_time
     logger.info(f"Total elapsed time: {elapsed}")

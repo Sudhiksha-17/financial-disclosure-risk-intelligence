@@ -343,55 +343,74 @@ documents. Future work: implement annual report downloader for
 these specific companies.
 
 ---
-
 ### Problem 7: 10-Q Filings with No Risk Factor Content (May 2026)
 
 **What happened:**
 Many companies succeed on 10-K extraction but fail on all 10-Q
-extractions despite the extractor working correctly. For example
-ALLY, BOKF, WAL, ZION, and STT all have complete 10-K coverage
-but zero successful 10-Q extractions.
+extractions. ALLY, BOKF, WAL, ZION, STT all have complete 10-K
+coverage but near-zero 10-Q extractions.
 
 **Root cause:**
-SEC rules only require companies to disclose material changes to
-risk factors in quarterly 10-Q filings, not repeat the full section.
-Companies that had no material changes write brief statements like
-"there have been no material changes to risk factors disclosed in
-our most recent Annual Report." This text is under our 1,000-word
-minimum and does not contain enough content to extract meaningfully.
+SEC rules only require disclosure of material changes in 10-Q
+filings. Companies with no material changes write brief statements
+like "there have been no material changes to risk factors since
+our most recent Annual Report." This is under our 1,000-word
+minimum.
 
 **Decision:**
-Accepted as expected behavior, not a bug. 10-K filings contain
-comprehensive annual risk disclosures and are the primary data
-source for consecutive pair analysis. 10-Q filings with no
-material changes are informative in themselves: no language change
-is a valid signal worth documenting.
+Accepted as expected behavior. 10-K filings are the primary data
+source. No change in 10-Q is itself a valid signal.
 
-**Impact on analysis:**
-Consecutive pair construction will primarily use annual 10-K pairs
-supplemented by 10-Q pairs where available. This is methodologically
-stronger since annual pairs control for seasonal language patterns
-automatically. The dataset contains complete 10-K coverage for 20
-out of 25 banking sector companies covering 2019 to 2024.
+**Impact:**
+Consecutive pair construction primarily uses annual 10-K pairs
+supplemented by 10-Q pairs where available. Annual pairs
+naturally control for seasonal language patterns.
 
 ---
 
-### Summary: Banking Sector Extraction Results (May 2026)
+### Dataset Quality Notes
 
-| Category | Count |
-|----------|-------|
-| Successful extractions | 263 |
-| Companies with full 10-K coverage | 20/25 |
-| Companies using incorporation by reference | 3 (WFC, USB, BK) |
-| Companies with XBRL filing issues | 2 (MS, C) |
-| 10-Q failures due to SEC no-change policy | ~180 |
-| Period covered | 2019 to 2024 |
-| Sectors covered so far | Banking |
+**Sector skew:** Technology companies have cleaner filing formats
+and higher extraction rates than banking. Banking has systematic
+gaps from incorporation by reference at WFC, USB, and BK.
 
-**Next:** Insurance, Technology, Energy sectors to be processed
-using the same batch pipeline. Expected total dataset size after
-all four sectors: 900 to 1,100 successful extractions.
+**Temporal skew:** Dataset is weighted toward annual 10-K filings
+due to 10-Q no-change policy. This is methodologically acceptable
+since annual pairs are the primary unit of analysis.
 
+**Survivorship bias:** All 100 companies are currently listed or
+were listed for the majority of the 2019-2024 period. Companies
+that went bankrupt or were fully acquired before 2019 are not
+represented. SIVB (Silicon Valley Bank, collapsed March 2023)
+is a notable absence that would have been analytically interesting
+for liquidity risk escalation detection.
+
+---
+
+## Limitations
+
+- Single annotator ground truth introduces subjectivity
+- Yahoo Finance abnormal return proxies less precise than CDS
+  spreads pending WRDS summer access confirmation
+- LLM outputs non-deterministic across runs; temperature set
+  to 0 for reproducibility
+- Coverage limited to US-listed companies with English filings
+- Incorporation by reference gaps affect approximately 15% of
+  banking sector filings
+
+---
+
+## Future Work
+
+- CDS spread validation via WRDS Markit when access confirmed
+- Real-time EDGAR monitoring pipeline for live filing ingestion
+- Integration with sister Knowledge Graph repo for contagion modeling
+- Fine-tuning on finance-specific annotation dataset
+- Multi-annotator ground truth with inter-rater reliability scoring
+- SEC EDGAR Full Text Search API to eliminate raw download step
+- SIVB and First Republic Bank as stress-period validation cases
+
+---
 **Note for contributors:**
 This project was developed on Windows. All shell commands in
 this README use PowerShell syntax. Unix/Mac equivalents are
