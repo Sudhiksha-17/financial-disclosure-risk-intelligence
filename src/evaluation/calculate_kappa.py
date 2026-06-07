@@ -14,7 +14,7 @@ from pathlib import Path
 from sklearn.metrics import cohen_kappa_score
 from collections import Counter
 
-SHEET_PATH  = Path("outputs/annotation_sheet.csv")
+SHEET_PATH = Path("outputs/annotation_sheet.xlsx")
 OUTPUT_DIR  = Path("outputs")
 
 DIMENSIONS = {
@@ -29,7 +29,7 @@ VALID_LABELS = ["escalating", "stable", "de-escalating"]
 
 
 def run_kappa_analysis():
-    df = pd.read_csv(SHEET_PATH, encoding="latin-1")
+    df = pd.read_excel(SHEET_PATH)
     print("=" * 60)
     print("COHEN'S KAPPA ANALYSIS")
     print(f"Total rows: {len(df)}")
