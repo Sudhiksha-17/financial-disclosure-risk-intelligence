@@ -29,7 +29,7 @@ VALID_LABELS = ["escalating", "stable", "de-escalating"]
 
 
 def run_kappa_analysis():
-    df = pd.read_csv(SHEET_PATH)
+    df = pd.read_csv(SHEET_PATH, encoding="latin-1")
     print("=" * 60)
     print("COHEN'S KAPPA ANALYSIS")
     print(f"Total rows: {len(df)}")
