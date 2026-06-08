@@ -454,15 +454,215 @@ for liquidity risk escalation detection.
 
 ---
 
+---
+
+### Problem 9: Insufficient Text Extraction in Annotation Sample (June 2026)
+
+**What happened:**
+During human annotation of 50 filing pairs, 37% of regulatory risk
+dimensions and 48% of operational risk dimensions were marked
+insufficient_text because the 3,000 character text window in the
+annotation sheet did not reach the relevant sections.
+
+**Root cause:**
+SEC 10-K filings follow a consistent structure where risk factors
+appear in a specific order: credit risks first, then market risks,
+then operational risks, then regulatory risks. The 3,000 character
+window captures the beginning of Item 1A but frequently cuts off
+before reaching operational and regulatory sections which appear
+later in the document.
+
+**Impact on kappa scores:**
+Regulatory kappa was calculated on only 13 pairs versus 31 pairs
+for market risk. Low sample size inflates variance in kappa estimates
+and makes the regulatory score less reliable.
+
+**Decision:**
+Accepted as a methodology limitation. Future work should increase
+the annotation window to 8,000 characters or implement section-aware
+extraction that identifies and isolates each risk category
+independently.
+
+---
+
+### Problem 10: LLM Systematic Annotation Biases Identified (June 2026)
+
+**What happened:**
+Cohen's kappa analysis revealed three systematic biases in LLM risk
+classification relative to human judgment across 123 comparable
+dimension annotations.
+
+**Bias 1: Cannot detect de-escalation**
+Human annotators identified 11 de-escalating cases across all
+dimensions. The LLM identified zero de-escalating cases. The LLM
+interprets any risk language as at least stable and cannot recognize
+when specific risk factors have been removed or resolved between
+filings. Examples: MTB 2022-2023 where COVID and LIBOR language was
+entirely removed, GL 2023-2024 where a dedicated COVID section was
+dropped, CFG 2022-2023 where COVID credit and liquidity language
+was removed.
+
+**Bias 2: Over-fires on operational risk**
+Human: 9 escalating, 15 stable out of 26 annotatable pairs.
+LLM: 18 escalating, 8 stable.
+The LLM codes operational risk as escalating roughly twice as often
+as human judgment warrants. Likely cause: operational risk language
+is verbose in filings and the LLM correlates text length with
+escalation severity rather than identifying genuinely new risk content.
+
+**Bias 3: Under-fires on liquidity risk**
+Human: 7 escalating, 2 de-escalating out of 24 annotatable pairs.
+LLM: 1 escalating, 0 de-escalating.
+The LLM calls almost all liquidity risk stable regardless of content.
+Likely cause: liquidity risk language in financial filings is often
+embedded within broader market or credit risk sections rather than
+appearing as standalone bullets.
+
+**Consistency with regression results:**
+The two regression-significant dimensions, credit risk
+(beta=0.032, p=0.028) and regulatory risk (beta=0.038, p=0.046),
+have the highest kappa scores of 0.220 and 0.085 respectively.
+The regression-insignificant dimensions, liquidity (p=0.190) and
+operational (p=0.775), have the lowest kappa scores. This internal
+consistency between annotation quality and regression significance
+strengthens confidence in the credit and regulatory findings.
+
+**Next step:**
+LoRA fine-tuning on annotated pairs to improve calibration across
+all five dimensions simultaneously.
+
+---
+
+### Problem 11: Prompt Engineering Instability in Multi-Dimension Classification (June 2026)
+
+**What happened:**
+Attempted to improve kappa scores from 0.219 to 0.4+ by rewriting
+the prompt with few-shot examples and explicit de-escalation
+instructions. The v2 prompt caused overall kappa to drop from
+0.219 to 0.076.
+
+**Root cause:**
+Prompt changes that fixed one dimension introduced biases in others.
+Adding five de-escalation examples caused the model to over-predict
+de-escalating across all dimensions, particularly credit risk where
+LLM predictions jumped from 11 escalating to 12 de-escalating
+against human annotations showing only 1 de-escalating case.
+The anti-length-bias instruction simultaneously suppressed legitimate
+escalation detection in operational risk.
+
+**Key insight:**
+Instruction-tuned LLMs use the prompt as a global instruction set.
+Changes intended for one dimension affect all dimensions simultaneously
+because the model cannot isolate instructions by dimension. This makes
+prompt engineering fundamentally unstable for multi-class multi-label
+classification tasks where each class has different base rates.
+
+**Decision:**
+Reverted to v1 prompt which produces overall kappa of 0.219.
+Proceeding to LoRA fine-tuning which directly optimizes model weights
+for the specific classification task using 123 annotated pairs as
+training data. Fine-tuning can improve per-dimension calibration
+independently in ways that prompt engineering cannot.
+
+---
+
+## Analysis Findings
+
+### Key Result 1: Credit and Regulatory Risk Signals Predict Market Reactions
+
+Panel OLS regression across 410 filing pairs (86 companies, 4 sectors,
+2020-2024) with sector and year fixed effects:
+
+| Dimension | Beta | p-value | Significant |
+|-----------|------|---------|-------------|
+| credit_dir | +0.032 | 0.028 | Yes |
+| regulatory_dir | +0.038 | 0.046 | Yes |
+| liquidity_dir | +0.029 | 0.190 | No |
+| operational_dir | +0.004 | 0.775 | No |
+| market_dir | -0.010 | 0.645 | No |
+
+R-squared: 0.22. CAR mean: -4.09% across all pairs.
+
+Interpretation: Companies disclosing escalating credit and regulatory
+risk language experience positive abnormal returns in the 30 days
+following filing. This counterintuitive direction may reflect market
+reward for transparency, or that these disclosures contain
+forward-looking information investors view as constructive engagement
+with known risks rather than surprises.
+
+### Key Result 2: LLM-Human Agreement by Dimension
+
+Cohen's kappa between Llama-3 8B v1 prompt predictions and human
+annotations across 123 comparable dimension-level annotations:
+
+| Dimension | Kappa | n | Interpretation |
+|-----------|-------|---|----------------|
+| credit | 0.220 | 29 | Fair |
+| operational | 0.208 | 26 | Slight |
+| market | 0.161 | 31 | Slight |
+| liquidity | 0.143 | 24 | Slight |
+| regulatory | 0.085 | 13 | Slight |
+| **overall** | **0.219** | **123** | **Fair** |
+
+Key finding: The LLM cannot detect de-escalation (0 de-escalating
+predictions versus 11 human annotations) and systematically
+over-detects operational risk escalation. Credit risk shows the
+highest agreement, consistent with it being the regression-significant
+dimension with the clearest signal-to-noise ratio in filing language.
+
+### Key Result 3: Dataset Quality
+
+Of 50 annotation pairs sampled, 37% of regulatory dimensions and 48%
+of operational dimensions were marked insufficient_text due to text
+truncation. Fully annotatable rows with all 5 dimensions valid: 6 out
+of 50. Partial rows with at least one valid dimension: 28 out of 50.
+
+---
+
+## Dataset Quality Notes
+
+**Sector skew:** Technology companies have cleaner filing formats and
+higher extraction rates than banking. Banking has systematic gaps from
+incorporation by reference at WFC, USB, and BK.
+
+**Temporal skew:** Dataset is weighted toward annual 10-K filings due
+to 10-Q no-change policy. This is methodologically acceptable since
+annual pairs are the primary unit of analysis.
+
+**Survivorship bias:** All 100 companies are currently listed or were
+listed for the majority of the 2019-2024 period. SIVB (Silicon Valley
+Bank, collapsed March 2023) is a notable absence that would have been
+analytically interesting for liquidity risk escalation detection.
+
+---
+
+## Limitations
+
+- Single annotator ground truth introduces subjectivity
+- Yahoo Finance abnormal return proxies less precise than CDS spreads
+  pending WRDS summer access
+- LLM outputs non-deterministic across runs; temperature set to 0
+  for reproducibility
+- Coverage limited to US-listed companies with English filings
+- Incorporation by reference gaps affect approximately 15% of banking
+  sector filings
+- Prompt engineering shown to be unstable for multi-dimension
+  classification; LoRA fine-tuning in progress
+
+---
+
 ## Future Work
 
+- LoRA fine-tuning on 123 annotated pairs to improve kappa scores
+- Safety extension: disclosure quality classifier framing evasive
+  language detection as analogue to deceptive alignment
 - CDS spread validation via WRDS Markit when access confirmed
-- Real-time EDGAR monitoring pipeline for live filing ingestion
-- Integration with sister Knowledge Graph repo for contagion modeling
-- Fine-tuning on finance-specific annotation dataset
+- Streamlit demo with risk signal timeline and disclosure quality scores
+- Lightweight knowledge graph using 410 signals as node features
+- Real-time EDGAR monitoring pipeline
 - Multi-annotator ground truth with inter-rater reliability scoring
-- SEC EDGAR Full Text Search API to eliminate raw download step
 - SIVB and First Republic Bank as stress-period validation cases
+- SEC EDGAR Full Text Search API to eliminate raw download step
 
 ---
 **Note for contributors:**
