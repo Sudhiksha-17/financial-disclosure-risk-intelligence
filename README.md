@@ -533,6 +533,8 @@ all five dimensions simultaneously.
 
 ---
 
+---
+
 ### Problem 11: Prompt Engineering Instability in Multi-Dimension Classification (June 2026)
 
 **What happened:**
@@ -558,11 +560,58 @@ prompt engineering fundamentally unstable for multi-class multi-label
 classification tasks where each class has different base rates.
 
 **Decision:**
-Reverted to v1 prompt which produces overall kappa of 0.219.
-Proceeding to LoRA fine-tuning which directly optimizes model weights
-for the specific classification task using 123 annotated pairs as
-training data. Fine-tuning can improve per-dimension calibration
-independently in ways that prompt engineering cannot.
+Reverted to v1 prompt which produces overall kappa of 0.207.
+Proceeded to LoRA fine-tuning which directly optimizes model weights
+for the specific classification task.
+
+---
+
+### Problem 12: LoRA Fine-tuning Label Collapse (June 2026)
+
+**What happened:**
+Two rounds of LoRA fine-tuning on Llama-3 8B via Google Colab T4 GPU
+produced degenerate models. Round 1 with 98 imbalanced examples
+predicted stable for all 25 validation examples, kappa 0.000.
+Round 2 with 150 balanced examples via oversampling predicted
+de-escalating 15 out of 25 times, kappa -0.183.
+
+**Root cause:**
+Three compounding factors across both attempts.
+
+Round 1 failure: Class imbalance of 54 stable, 35 escalating, 9
+de-escalating was not corrected. Aggressive truncation to 512 tokens
+removed most filing content. The model learned to predict the majority
+class stable to minimize loss.
+
+Round 2 failure: The 9 de-escalating training examples were all from
+the 2022-2023 period and primarily captured COVID language removal
+in market risk. Duplicating them to 50 caused the model to memorize
+the specific COVID-removal pattern rather than learning the general
+concept of de-escalation. Every new input superficially matched the
+oversampled pattern, producing de-escalating predictions across all
+dimensions and companies.
+
+**Evidence of root cause:**
+De-escalating training examples broke down as: 6 out of 9 were
+market_risk, 3 out of 9 were from CFG 2022-2023 alone, 7 out of 9
+were from the 2022-2023 transition period. Oversampling this
+concentrated distribution 5x created a highly specific spurious
+signal rather than a generalizable classifier.
+
+**Key insight:**
+Fine-tuning on minority classes requires both sufficient quantity and
+sufficient diversity. 9 examples from 3 companies spanning 1 year
+cannot generalize even with oversampling. The minimum viable dataset
+for this task is estimated at 30 or more diverse de-escalating
+examples spanning multiple companies, sectors, and transition types
+before fine-tuning is likely to succeed.
+
+**Next steps:**
+Annotate 20 additional de-escalating candidates identified from the
+410 existing pairs using LLM-predicted de-escalating cases as a
+high-precision starting point. With 29 or more diverse de-escalating
+examples, retry fine-tuning with sequence classification head rather
+than generative approach.
 
 ---
 
@@ -571,7 +620,8 @@ independently in ways that prompt engineering cannot.
 ### Key Result 1: Credit and Regulatory Risk Signals Predict Market Reactions
 
 Panel OLS regression across 410 filing pairs (86 companies, 4 sectors,
-2020-2024) with sector and year fixed effects:
+2020-2024) with sector and year fixed effects. Dependent variable is
+30-day cumulative abnormal return (CAR) relative to SPY.
 
 | Dimension | Beta | p-value | Significant |
 |-----------|------|---------|-------------|
@@ -581,19 +631,32 @@ Panel OLS regression across 410 filing pairs (86 companies, 4 sectors,
 | operational_dir | +0.004 | 0.775 | No |
 | market_dir | -0.010 | 0.645 | No |
 
-R-squared: 0.22. CAR mean: -4.09% across all pairs.
+R-squared: 0.22. CAR mean: -4.09% across all 410 pairs.
 
 Interpretation: Companies disclosing escalating credit and regulatory
 risk language experience positive abnormal returns in the 30 days
-following filing. This counterintuitive direction may reflect market
-reward for transparency, or that these disclosures contain
-forward-looking information investors view as constructive engagement
-with known risks rather than surprises.
+following the filing. This counterintuitive direction may reflect
+market reward for transparency, or that these disclosures contain
+forward-looking information that investors view as constructive
+engagement with known risks rather than unexpected surprises.
+
+The internal consistency between this regression result and the kappa
+analysis strengthens confidence in the finding. Credit risk, the
+dimension with the highest kappa of 0.220, is also the dimension with
+the strongest and most significant regression coefficient. Operational
+risk, the dimension with the most severe LLM over-firing bias, has
+the weakest regression coefficient at p=0.775. This pattern suggests
+the LLM signal quality predicts regression significance, which is
+exactly what we would expect if the signals are capturing genuine
+risk language shifts rather than noise.
+
+---
 
 ### Key Result 2: LLM-Human Agreement by Dimension
 
 Cohen's kappa between Llama-3 8B v1 prompt predictions and human
-annotations across 123 comparable dimension-level annotations:
+annotations across 123 comparable dimension-level annotations from
+50 sampled filing pairs:
 
 | Dimension | Kappa | n | Interpretation |
 |-----------|-------|---|----------------|
@@ -602,20 +665,142 @@ annotations across 123 comparable dimension-level annotations:
 | market | 0.161 | 31 | Slight |
 | liquidity | 0.143 | 24 | Slight |
 | regulatory | 0.085 | 13 | Slight |
-| **overall** | **0.219** | **123** | **Fair** |
+| **overall** | **0.207** | **123** | **Fair** |
 
-Key finding: The LLM cannot detect de-escalation (0 de-escalating
-predictions versus 11 human annotations) and systematically
-over-detects operational risk escalation. Credit risk shows the
-highest agreement, consistent with it being the regression-significant
-dimension with the clearest signal-to-noise ratio in filing language.
+Three systematic LLM biases identified and documented:
 
-### Key Result 3: Dataset Quality
+**Bias 1: Cannot detect de-escalation.**
+Human annotators identified 11 de-escalating cases. The LLM identified
+zero. The model interprets any risk language as at minimum stable and
+cannot recognize when specific risk sections have been removed or
+resolved between filings.
+
+**Bias 2: Over-fires on operational risk.**
+Human: 9 escalating, 15 stable. LLM: 19 escalating, 7 stable. The
+model codes operational risk as escalating roughly twice as often as
+human judgment warrants, likely because operational risk language is
+verbose and the model correlates text length with escalation severity.
+
+**Bias 3: Under-fires on liquidity risk.**
+Human: 7 escalating, 2 de-escalating. LLM: 1 escalating, 0
+de-escalating. Liquidity risk language is typically embedded within
+broader market or credit sections rather than appearing as standalone
+bullets, making it harder for the model to isolate as a distinct
+signal.
+
+**Annotation methodology note:**
+Human annotations were produced by a single non-expert annotator
+following a structured rubric anchored to structural text features
+rather than semantic financial interpretation. Disagreement patterns
+are directionally systematic rather than random, suggesting the LLM
+has specific calibration failures rather than the human having random
+noise. The primary regression finding is independent of human
+annotations entirely and is validated against objective market data.
+
+---
+
+### Key Result 3: Fine-tuning Calibration Experiments
+
+Two rounds of LoRA fine-tuning were conducted on Google Colab T4 GPU
+using the human-annotated pairs as training data.
+
+| Experiment | Training data | Val kappa | Notes |
+|------------|--------------|-----------|-------|
+| Base LLM v1 prompt | None | 0.207 | Baseline |
+| v2 prompt engineering | None | 0.076 | Over-corrected |
+| LoRA round 1 | 98 imbalanced | 0.000 | Stable collapse |
+| LoRA round 2 | 150 balanced | -0.183 | De-escalating collapse |
+
+The fine-tuning experiments produced negative results that are
+informative rather than merely failed attempts. They demonstrate that
+improving LLM calibration for this task requires either substantially
+more annotated data, particularly diverse minority class examples, or
+a classification head architecture rather than generative fine-tuning.
+The baseline v1 prompt kappa of 0.207 remains the best result.
+
+---
+
+### Key Result 4: Dataset Quality
 
 Of 50 annotation pairs sampled, 37% of regulatory dimensions and 48%
 of operational dimensions were marked insufficient_text due to text
-truncation. Fully annotatable rows with all 5 dimensions valid: 6 out
-of 50. Partial rows with at least one valid dimension: 28 out of 50.
+truncation in the 3,000 character annotation window. This reflects the
+SEC filing structure where credit and market risks appear first and
+operational and regulatory risks appear later in Item 1A.
+
+| Annotation status | Count | Percentage |
+|-------------------|-------|------------|
+| Fully annotatable (all 5 dims) | 6 | 12% |
+| Partial (at least 1 dim valid) | 28 | 56% |
+| Fully insufficient | 16 | 32% |
+| Total | 50 | 100% |
+
+Regulatory kappa was computed on only 13 pairs versus 31 for market
+risk, making the regulatory estimate the least reliable. Future work
+should increase the annotation window to 8,000 characters or implement
+section-aware extraction.
+
+---
+
+## Safety and Alignment Extension (Planned)
+
+This project is being extended with a safety and alignment research
+layer that connects financial disclosure analysis to AI evaluation
+methodology. The core argument is as follows.
+
+Financial disclosures are an empirically validated domain for studying
+evasive behavior under evaluation pressure. Companies face strong
+incentives to satisfy SEC disclosure requirements while minimizing the
+reputational and market impact of adverse disclosures. The resulting
+behavior, satisfying formal evaluation criteria while concealing
+material information, is structurally identical to what alignment
+researchers call deceptive alignment in AI systems.
+
+### Evasion Taxonomy
+
+Four types of institutional evasion that map onto alignment concepts:
+
+**Type 1: Omission Evasion**
+A risk present in the earlier filing is entirely absent from the
+later filing without explanation. Maps to capability concealment and
+sandbagging in AI systems.
+
+**Type 2: Obfuscation Evasion**
+The risk is mentioned but in language so generic it fails to
+communicate the specific exposure. Maps to deceptive alignment where
+model outputs pass formal evaluation without carrying intended content.
+
+**Type 3: Displacement Evasion**
+The risk is disclosed but buried in low-salience locations after dense
+boilerplate, satisfying the letter of the requirement while minimizing
+attention. Maps to specification gaming.
+
+**Type 4: Framing Evasion**
+Technically accurate language that creates a systematically misleading
+impression, for example using prospective language to describe a past
+event. Maps to sycophancy in language models.
+
+### Planned Methodology
+
+Phase 1: Second annotation pass adding specificity scores and evasion
+type flags to existing 50 pairs.
+
+Phase 2: Automated evasion detector running a third Llama-3 inference
+pass on all 410 pairs to classify specificity and consistency.
+
+Phase 3: SEC comment letter validation. EDGAR comment letters sent to
+companies about inadequate risk disclosure serve as external ground
+truth for evasive disclosure, enabling precision and recall computation
+against known inadequate disclosure cases.
+
+Phase 4: LLM generation experiments. Prompt multiple models to
+generate synthetic risk disclosures under evaluation pressure and test
+whether the evasion detector identifies institutionally evasive
+patterns in the generated text. This tests the hypothesis that models
+trained on financial text have learned institutional evasion patterns.
+
+Phase 5: ArXiv preprint framing financial disclosure as a model
+organism for studying deceptive compliance in institutional text.
 
 ---
 
@@ -629,49 +814,68 @@ incorporation by reference at WFC, USB, and BK.
 to 10-Q no-change policy. This is methodologically acceptable since
 annual pairs are the primary unit of analysis.
 
-**Survivorship bias:** All 100 companies are currently listed or were
-listed for the majority of the 2019-2024 period. SIVB (Silicon Valley
-Bank, collapsed March 2023) is a notable absence that would have been
-analytically interesting for liquidity risk escalation detection.
+**Survivorship bias:** All 100 companies were listed for the majority
+of the 2019-2024 period. SIVB (Silicon Valley Bank, collapsed March
+2023) is a notable absence that would have been analytically
+interesting for liquidity risk escalation detection given its
+documented pre-collapse risk language changes.
 
 ---
 
 ## Limitations
 
-- Single annotator ground truth introduces subjectivity
-- Yahoo Finance abnormal return proxies less precise than CDS spreads
-  pending WRDS summer access
-- LLM outputs non-deterministic across runs; temperature set to 0
-  for reproducibility
-- Coverage limited to US-listed companies with English filings
+- Single annotator ground truth introduces subjectivity. Second
+  annotator validation using a different LLM is planned.
+- Yahoo Finance abnormal return proxies are less precise than CDS
+  spreads. WRDS Markit access pending for summer 2026.
+- LLM outputs are non-deterministic across runs. Temperature set to 0
+  and seed fixed at 42 for reproducibility across all 410 pairs.
+- Coverage limited to US-listed companies with English filings.
 - Incorporation by reference gaps affect approximately 15% of banking
-  sector filings
-- Prompt engineering shown to be unstable for multi-dimension
-  classification; LoRA fine-tuning in progress
+  sector filings.
+- Fine-tuning shown to require more diverse minority class examples
+  than currently available. Minimum estimated at 30 diverse
+  de-escalating cases versus 9 currently annotated.
+- 512 token truncation during fine-tuning removes most filing content,
+  limiting model access to discriminative text.
 
 ---
 
 ## Future Work
 
-- LoRA fine-tuning on 123 annotated pairs to improve kappa scores
-- Safety extension: disclosure quality classifier framing evasive
-  language detection as analogue to deceptive alignment
-- CDS spread validation via WRDS Markit when access confirmed
-- Streamlit demo with risk signal timeline and disclosure quality scores
-- Lightweight knowledge graph using 410 signals as node features
-- Real-time EDGAR monitoring pipeline
-- Multi-annotator ground truth with inter-rater reliability scoring
+**Near term:**
+- Annotate 20 additional de-escalating candidates from 31 LLM-identified
+  cases across the 410 existing pairs
+- Retry LoRA fine-tuning with diverse balanced dataset and sequence
+  classification head architecture
+- Second annotator validation using Mistral 7B via Ollama to compute
+  inter-annotator kappa and validate annotation quality
+- Streamlit demo with ticker input, risk signal timeline, and
+  regression overlay
+
+**Medium term:**
+- Safety extension: evasion taxonomy annotation, automated evasion
+  detector, SEC comment letter validation
+- LLM generation experiments testing whether evaluation pressure
+  amplifies institutional evasion patterns in model outputs
+- ArXiv preprint: Institutional Evasion as a Testbed for AI Evaluation
+  Methodology
+- Lightweight knowledge graph using 410 signals as node features with
+  contagion modeling
+
+**Longer term:**
+- CDS spread validation via WRDS Markit
+- Multi-annotator ground truth with formal inter-rater reliability
 - SIVB and First Republic Bank as stress-period validation cases
+- Real-time EDGAR monitoring pipeline
 - SEC EDGAR Full Text Search API to eliminate raw download step
 
 ---
-**Note for contributors:**
-This project was developed on Windows. All shell commands in
-this README use PowerShell syntax. Unix/Mac equivalents are
-standard bash commands.
+
+---
 
 ## Author
 
-**Sudhiksha Kandavel Rajan**  
-MS Artificial Intelligence, Northeastern University  
+**Sudhiksha Kandavel Rajan**
+MS Artificial Intelligence, Northeastern University
 [LinkedIn](https://www.linkedin.com/in/sudhiksha-kandavel-rajan-71b4651b5/) · [GitHub](https://github.com/Sudhiksha-17) · [HUX AI Paper](https://arxiv.org/abs/2407.19492)
