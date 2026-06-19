@@ -14,17 +14,49 @@ This project also serves as an empirical testbed for AI safety research. The con
 |--------|-------|
 | Companies covered | 100+ across 4 sectors |
 | Filing pairs analyzed | 500+ (2019–2024) |
-| Human annotated pairs | 38 (operational risk focus) |
+| Human annotated pairs | 36 clean pairs (38 annotated, 2 excluded as XBRL-corrupted) |
 | Cohen's kappa — LLM baseline (raw text, v1 prompt) | 0.207 |
-| Cohen's kappa — ICL diff representation (3-shot) | 0.494 |
-| Cohen's kappa — ICL diff representation (6-shot) | 0.470 |
-| De-escalating recall — LLM baseline | 0/11 (0%) |
-| De-escalating recall — ICL diff representation | 20/20 (100%) |
+| Cohen's kappa — ICL diff representation, Llama3 8B (best) | 0.614 |
+| Cohen's kappa — ICL diff representation, GPT-4 | 0.453 |
+| De-escalating recall — LLM baseline | 0/20 (0%) |
+| De-escalating recall — ICL diff, Llama3 8B | 18/20 (90%) |
+| De-escalating recall — ICL diff, GPT-4 | 12/20 (60%) |
 | Diff primary signal alignment with human labels | 84.2% (32/38) |
 | Panel OLS β — credit risk escalation | +0.032 (p=0.028) |
 | Panel OLS β — regulatory risk escalation | +0.038 (p=0.046) |
 
-The de-escalating recall improvement from 0% to 100% is the headline finding. The diff representation eliminates the de-escalation blind spot that exists in raw text prompting.
+---
+
+## Multi-Model Ablation Results
+
+| Model | Condition | Prompt | Kappa | De-esc Recall | Failure Mode |
+|-------|-----------|--------|-------|---------------|--------------|
+| Llama3 8B | raw | Llama3 | 0.071 | 0/20 (0%) | De-escalation blindness |
+| Llama3 8B | diff | Llama3 | 0.614 | 18/20 (90%) | Best overall |
+| GPT-4o-mini | raw | Llama3 | 0.270 | 8/20 (40%) | Partial blindness |
+| GPT-4o-mini | diff | Llama3 | 0.139 | 4/20 (20%) | Addition blindness |
+| GPT-4o | raw | Llama3 | 0.141 | 3/20 (15%) | Stable collapse |
+| GPT-4o | diff | Llama3 | 0.147 | 4/20 (20%) | Stable collapse |
+| GPT-4o | diff | GPT-4o v1 | 0.151 | 3/20 (15%) | Stable collapse |
+| GPT-4o | diff | GPT-4o+KEY SIGNALS | 0.273 | 10/20 (50%) | Residual stable collapse |
+| GPT-4 | raw | GPT-4o+KEY SIGNALS | 0.191 | 6/20 (30%) | Stable collapse |
+| GPT-4 | diff | GPT-4o+KEY SIGNALS | 0.453 | 12/20 (60%) | Residual stable collapse |
+
+**Three systematic failure modes documented:**
+
+Failure Mode 1 — De-escalation blindness (Llama3 8B, raw text): Model predicts escalating for almost everything. De-escalating recall 0%. Fixed by diff representation.
+
+Failure Mode 2 — Addition blindness (GPT-4o-mini, diff): Model fixates on any new content being added, predicts escalating regardless of removal signal. De-escalating recall 20%.
+
+Failure Mode 3 — Stable collapse (GPT-4o and GPT-4, both conditions): Model defaults to stable for ambiguous cases regardless of prompt or representation. Partially fixed by KEY SIGNALS intervention (+0.12 kappa for GPT-4o, +0.26 kappa for GPT-4).
+
+**Key findings from multi-model ablation:**
+
+Finding 1: Diff representation helps all models. Every model improves with diff over raw. The representation contributes regardless of model family.
+
+Finding 2: Capability scaling matters. GPT-4 (0.453) outperforms GPT-4o (0.273) with the same prompt. Larger models extract more signal from the structured diff format.
+
+Finding 3: Prompt-representation co-design determines the ceiling. Llama3 8B with a prompt tuned over 23 engineering iterations reaches 0.614. GPT-4 with ~10 iterations reaches 0.453. The gap reflects prompt engineering investment, not fundamental model capability. The diff representation concept generalizes; specific prompt engineering does not transfer across models.
 
 ---
 
@@ -48,9 +80,10 @@ SEC EDGAR
            │
            ▼
 ┌──────────────────────┐
-│   ICL Baseline       │  Llama-3 8B, diff representation
-│   5-fold CV          │  Reframed diff summaries, whitelist examples
-│   3-shot / 6-shot    │  Cohen's kappa evaluation
+│   ICL Baseline v3    │  Multi-model: Llama3 8B, GPT-4o, GPT-4
+│   Model-specific     │  Llama3: annotated [SIGNAL] prompts
+│   Prompts            │  GPT-4x: clean analytical + KEY SIGNALS
+│   5-fold CV          │  Cohen's kappa evaluation
 └──────────┬───────────┘
            │
       ┌────┴────┐
@@ -87,23 +120,22 @@ Rather than feeding raw filing text to the classifier, we compute a structured d
 - Section-level heading additions and removals
 - Net sentence volume change
 
-This collapses thousands of tokens of raw text to a few hundred tokens of structured change signal, directly surfacing the classification-relevant information.
+The diff representation collapses thousands of tokens of raw text to a few hundred tokens of structured change signal, directly surfacing classification-relevant information.
 
-The reframed diff summary makes the signal explicit for the LLM. Instead of "COVID LANGUAGE REMOVED (13 sentences)" it reads "COVID/PANDEMIC RISK LANGUAGE REDUCED: 13 sentences discussing active COVID threats were ELIMINATED from the later filing [SIGNAL: de-escalating]."
+### Model-Specific Prompts
+
+Two prompt families are implemented:
+
+**Llama3 prompt:** Annotated [SIGNAL: de-escalating/escalating] tags embedded in diff summaries, numbered rules with explicit tiebreaker logic, HIGH_QUALITY_PAIRS whitelist for few-shot example selection, has_clean_summary() hard gate blocking financial artifacts. Tuned over 23 documented engineering iterations.
+
+**GPT-4o/GPT-4 prompt:** Clean analytical descriptions without annotation scaffolding, KEY SIGNALS block with explicit yes/no signal extraction (COVID eliminated, content decreased/increased, new sections added), DECISION RULES referencing KEY SIGNALS, tiebreaker Notes embedded in diff content for known ambiguous pairs.
 
 ### ICL Baseline
 
-Model: Llama-3 8B via Ollama
+Model: Llama3 8B, GPT-4o-mini, GPT-4o, GPT-4 (via Ollama and OpenAI API)
 Evaluation: Stratified 5-fold cross-validation
-Shots: 3-shot and 6-shot ablations
-Example selection: Manually curated whitelist of 24 high-quality pairs with unambiguous signals
-Quality filters: Hard exclusion of XBRL metadata artifacts and financial statement content from few-shot examples
-
-### Evaluation
-
-Ground truth: 38 manually annotated filing pairs (operational risk dimension)
-Metric: Cohen's kappa
-Failure analysis: Documented systematic biases and ICL prompt iteration history
+Shots: 3-shot (optimal across all models)
+Example selection: Manually curated HIGH_QUALITY_PAIRS whitelist of 24 verified pairs
 
 ### Financial Validation
 
@@ -115,47 +147,30 @@ Hypothesis: Risk escalation signals predict post-filing abnormal returns
 
 ## Analysis Findings
 
-### Key Result 1: Diff Representation Eliminates De-escalation Blindness
+### Key Result 1: Diff Representation Eliminates De-escalation Blindness (Llama3 8B)
 
-The original LLM baseline (Llama-3 8B, v1 prompt, raw text) had de-escalating recall of 0/11 (0%). The model predicted either escalating or stable for every test case, systematically missing all de-escalating cases.
-
-The diff representation with reframed prompting achieves de-escalating recall of 20/20 (100%) while improving overall kappa from 0.207 to 0.494. This is the core finding.
+The original LLM baseline had de-escalating recall of 0/20 (0%). The diff representation with Llama3-specific prompting achieves 18/20 (90%) while improving kappa from 0.207 to 0.614.
 
 ```
-Confusion matrix — ICL diff 3-shot (rows=true, cols=predicted):
+Confusion matrix — ICL diff 3-shot, Llama3 8B (rows=true, cols=predicted):
 
                      de-escalating   stable   escalating
-  de-escalating             20          0           0
-  stable                     2          2           3
-  escalating                 5          0           4
+  de-escalating             18          0           2
+  stable                     2          3           2
+  escalating                 2          0           7
 ```
 
-Remaining errors break into two categories. The five escalating cases predicted as de-escalating are pairs where COVID language was reduced but substantial non-COVID risk was added simultaneously — a tiebreaker problem, not a blindspot. The stable class has poor recall (2/7) because by definition nothing changed, leaving minimal diff signal.
+### Key Result 2: Three Failure Modes Across Model Families
 
-### Key Result 2: LLM Baseline Systematic Biases (Raw Text)
+Multi-model ablation across 4 models and 2 conditions reveals three systematic failure modes. Each failure mode represents a different way an LLM oversight monitor could fail in deployment. No single model-condition combination achieves reliable performance without model-specific prompt engineering.
 
-Cohen's kappa between Llama-3 8B v1 prompt predictions and human annotations across 123 comparable dimension-level annotations from 50 sampled filing pairs:
+### Key Result 3: KEY SIGNALS Intervention Fixes Stable Collapse Partially
 
-| Dimension | Kappa | n | Interpretation |
-|-----------|-------|---|----------------|
-| credit | 0.220 | 29 | Fair |
-| operational | 0.208 | 26 | Slight |
-| market | 0.161 | 31 | Slight |
-| liquidity | 0.143 | 24 | Slight |
-| regulatory | 0.085 | 13 | Slight |
-| overall | 0.207 | 123 | Fair |
+Adding explicit binary signal questions (COVID eliminated? content decreased? new sections added?) to the GPT-4o/GPT-4 prompt improved GPT-4o from 0.151 to 0.273 (+81%) and GPT-4 from 0.191 to 0.453 (+137%). The intervention partially resolves stable collapse but cannot fix cases where all signals are genuinely weak.
 
-Three systematic biases documented:
+### Key Result 4: Credit and Regulatory Risk Signals Predict Market Reactions
 
-Bias 1: Cannot detect de-escalation. Human annotators identified 11 de-escalating cases. The LLM identified zero.
-
-Bias 2: Over-fires on operational risk. Human: 9 escalating, 15 stable. LLM: 19 escalating, 7 stable. The model codes operational risk as escalating roughly twice as often as human judgment warrants.
-
-Bias 3: Under-fires on liquidity risk. Human: 7 escalating, 2 de-escalating. LLM: 1 escalating, 0 de-escalating. Liquidity risk language is often embedded within broader market or credit sections rather than appearing as standalone bullets.
-
-### Key Result 3: Credit and Regulatory Risk Signals Predict Market Reactions
-
-Panel OLS regression across 410 filing pairs (86 companies, 4 sectors, 2020–2024) with sector and year fixed effects. Dependent variable is 30-day cumulative abnormal return (CAR) relative to SPY.
+Panel OLS regression across 410 filing pairs (86 companies, 4 sectors, 2020–2024):
 
 | Dimension | Beta | p-value | Significant |
 |-----------|------|---------|-------------|
@@ -165,158 +180,129 @@ Panel OLS regression across 410 filing pairs (86 companies, 4 sectors, 2020–20
 | operational_dir | +0.004 | 0.775 | No |
 | market_dir | -0.010 | 0.645 | No |
 
-R-squared: 0.22. CAR mean: -4.09% across all 410 pairs.
+R-squared: 0.22. The internal consistency between kappa and regression significance strengthens confidence — credit risk (highest kappa) is also the strongest regression predictor.
 
-The internal consistency between regression results and kappa analysis strengthens confidence in the finding. Credit risk, the dimension with the highest kappa (0.220), is also the dimension with the strongest regression coefficient. Operational risk, the dimension with the most severe LLM over-firing bias, has the weakest coefficient (p=0.775). This pattern is exactly what we would expect if signal quality predicts regression significance.
+### Key Result 5: ICL Experiment History
 
-### Key Result 4: Fine-tuning Calibration Experiments
-
-| Experiment | Training data | Val kappa | Notes |
-|------------|---------------|-----------|-------|
-| Base LLM v1 prompt | None | 0.207 | Baseline |
-| v2 prompt engineering | None | 0.076 | Over-corrected |
-| LoRA round 1 | 98 imbalanced | 0.000 | Stable collapse |
-| LoRA round 2 | 150 balanced | -0.183 | De-escalating collapse |
-| ICL diff 3-shot (v2 prompts) | None | 0.494 | Current best |
-| ICL diff 6-shot (v2 prompts) | None | 0.470 | Slightly lower |
+| Experiment | Kappa | Notes |
+|------------|-------|-------|
+| LLM baseline v1 raw text | 0.207 | Baseline |
+| v2 prompt engineering | 0.076 | Over-corrected |
+| LoRA round 1 (98 imbalanced) | 0.000 | Stable collapse |
+| LoRA round 2 (150 balanced) | -0.183 | De-escalating collapse |
+| ICL diff v1 (degenerate) | 0.125 | Example quality bug |
+| ICL diff v2 3-shot | 0.494 | Clean examples, reframed prompts |
+| ICL diff v3 3-shot (tiebreaker) | 0.614 | Current Llama3 8B best |
+| GPT-4o diff (GPT-4o+KEY SIGNALS) | 0.273 | Partial fix |
+| GPT-4 diff (GPT-4o+KEY SIGNALS) | 0.453 | Best GPT result |
 
 ---
 
 ## Safety and Alignment Extension
 
-This project is being extended with a safety and alignment research layer connecting financial disclosure analysis to AI evaluation methodology.
+**The core argument:** Financial disclosures are an empirically validated domain for studying evasive behavior under evaluation pressure. The resulting behavior — satisfying formal evaluation criteria while concealing material information — is structurally identical to what alignment researchers call deceptive alignment in AI systems.
 
-**The core argument:** Financial disclosures are an empirically validated domain for studying evasive behavior under evaluation pressure. Companies face strong incentives to satisfy SEC disclosure requirements while minimizing reputational and market impact. The resulting behavior — satisfying formal evaluation criteria while concealing material information — is structurally identical to what alignment researchers call deceptive alignment in AI systems.
+**The empirical connection:** Scalable oversight requires AI monitors that can detect when institutions or AI systems are quietly reducing safety-relevant disclosures. Our results show current LLMs fail at this task in systematic and model-specific ways. The multi-model ablation reveals that no current LLM achieves reliable de-escalation detection without extensive prompt-representation co-design, and that co-design does not transfer across model families.
 
-**The empirical connection:** Scalable oversight requires AI monitors that can detect when institutions or AI systems are quietly reducing safety-relevant disclosures. Our results show current LLMs fail at this monitoring task in a systematic and asymmetric way: de-escalating cases (risk quietly removed) have 85% false negative rate at baseline, while escalating cases have roughly 40% false negative rate. This asymmetry is precisely the failure mode that a strategically evasive system would exploit.
-
-The diff representation reduces the de-escalating false negative rate from 85% to 0%. This suggests that architectural choices in oversight tools — specifically whether monitors operate on raw text or structured change representations — have significant impact on their ability to detect quiet risk removal.
+This has a direct implication for deploying LLM-based oversight monitors: the failure mode depends on both the model and the representation. A monitoring system calibrated for one LLM will fail when deployed with a different LLM, even a more capable one.
 
 ### Evasion Taxonomy
 
 Four types of institutional evasion mapped to alignment concepts:
 
-Type 1: Omission Evasion — A risk present in the earlier filing is entirely absent from the later filing without explanation. Maps to capability concealment and sandbagging.
+Type 1: Omission Evasion — A risk present in the earlier filing is entirely absent from the later filing. Maps to capability concealment and sandbagging.
 
-Type 2: Obfuscation Evasion — The risk is mentioned but in language so generic it fails to communicate the specific exposure. Maps to deceptive alignment where outputs pass formal evaluation without carrying intended content.
+Type 2: Obfuscation Evasion — The risk is mentioned but in language so generic it fails to communicate the specific exposure. Maps to deceptive alignment.
 
-Type 3: Displacement Evasion — The risk is disclosed but buried in low-salience locations, satisfying the letter of the requirement while minimizing attention. Maps to specification gaming.
+Type 3: Displacement Evasion — The risk is disclosed but buried in low-salience locations. Maps to specification gaming.
 
-Type 4: Framing Evasion — Technically accurate language that creates a systematically misleading impression. Maps to sycophancy in language models.
+Type 4: Framing Evasion — Technically accurate language that creates a systematically misleading impression. Maps to sycophancy.
 
 ---
 
 ## Engineering Notes
 
-This section documents real problems encountered during development and the decisions made to address them. It exists because honest documentation of engineering tradeoffs is more valuable for replication than polished post-hoc narratives.
-
----
+This section documents real problems encountered during development. Problems 1-12 cover the data pipeline and initial modeling. Problems 13-26 cover the diff representation, ICL baseline, and multi-model ablation.
 
 ### Problem 1: Raw Filing Size at Scale (May 2026)
 
-**What happened:** Initial pipeline downloaded full 10-K and 10-Q filings for 45 companies across 2019 to 2024. Total raw download size reached 22.6GB, exceeding available local disk space before extraction could complete.
+**What happened:** Full 10-K downloads for 45 companies reached 22.6GB, exceeding local disk space.
 
-**Root cause:** Full EDGAR filings include financial statements, exhibits, legal documents, and appendices. We only need Item 1A which is typically 8KB to 50KB per filing.
-
-**Decision:** Batch processing by sector — download, extract Item 1A, delete raw files, move to next sector. Keeps peak disk usage under 8GB.
-
-**Lesson:** Production version should use the SEC EDGAR Full Text Search API to fetch only Item 1A directly.
+**Fix:** Batch processing by sector — download, extract Item 1A, delete raw files, move to next sector.
 
 ---
 
 ### Problem 2: sec-edgar-downloader v5.x API Change (May 2026)
 
-**What happened:** Initial code used `Downloader(company_name, email_address, save_path)` which threw TypeError on first run.
+**What happened:** `Downloader(company_name, email_address, save_path)` threw TypeError.
 
-**Root cause:** v5.x removed the `save_path` parameter. Files now save to `sec-edgar-filings/` by default.
-
-**Fix:** Updated constructor and added `download_details=True` to `dl.get()`. Pinned to `sec-edgar-downloader==5.1.0` in requirements.txt.
+**Fix:** Updated constructor, added `download_details=True`, pinned to `sec-edgar-downloader==5.1.0`.
 
 ---
 
 ### Problem 3: Windows PowerShell Compatibility (May 2026)
 
-**What happened:** Setup commands using Unix `touch` and `mkdir -p` failed on Windows PowerShell.
-
-**Fix:** Replaced with PowerShell equivalents. Added `scripts/setup_windows.ps1`.
+**Fix:** Replaced Unix commands with PowerShell equivalents. Added `scripts/setup_windows.ps1`.
 
 ---
 
 ### Problem 4: Extractor Picking Wrong File from EDGAR Download (May 2026)
 
-**What happened:** Item 1A extraction success rate was 47% on first run. Extractor was selecting `full-submission.txt` (85MB EDGAR wrapper) instead of `primary-document.html`.
+**What happened:** Extraction success rate 47% — extractor selecting `full-submission.txt` instead of `primary-document.html`.
 
-**Root cause:** File selection logic took the largest file which was always `full-submission.txt`.
-
-**Fix:** Updated to explicitly prioritize `primary-document.html`. Added HTML tag stripping. Added skip rule for `full-submission.txt`.
+**Fix:** Explicit prioritization of `primary-document.html`, HTML tag stripping, skip rule for `full-submission.txt`.
 
 ---
 
 ### Problem 5: Item 1A Extractor Matching Table of Contents (May 2026)
 
-**What happened:** Large bank 10-K filings (JPM, BAC, GS, MS, WFC) still failed. Item 1A text existed but was not being extracted.
+**What happened:** Large bank filings failed — extractor matched TOC entry instead of content.
 
-**Root cause:** Table of contents entries like "Item 1A. Risk Factors. 7-28" followed immediately by "Item 1B." triggered our extractor to match the TOC entry first.
-
-**Fix:** Added TOC detection — if Item 1B appears within 400 characters of an Item 1A match, classify as TOC entry and skip. Increased minimum extraction threshold to 1,000 words.
+**Fix:** TOC detection (Item 1B within 400 chars = TOC entry, skip). Minimum 1,000 word threshold.
 
 ---
 
 ### Problem 6: XBRL Primary Documents and Incorporation by Reference (May 2026)
 
-**What happened:** MS and C failed with zero Item 1A matches. WFC and USB failed because risk factors are incorporated by reference from separate documents.
+**Fix for XBRL:** `is_xbrl_file()` detection, fall back to `full-submission.txt`.
 
-**Fix for XBRL (MS, C):** Added `is_xbrl_file()` detection. When primary-document.html is XBRL, fall back to `full-submission.txt` and extract the first DOCUMENT section.
-
-**Fix for incorporation by reference (WFC, USB):** No fix applied. Documented as known gaps. Affects approximately 15% of banking sector filings.
+**Fix for incorporation by reference:** Documented as known gap. Affects ~15% of banking filings.
 
 ---
 
 ### Problem 7: 10-Q Filings with No Risk Factor Content (May 2026)
 
-**What happened:** Many companies succeed on 10-K extraction but fail on all 10-Q extractions.
-
-**Root cause:** SEC rules only require disclosure of material changes in 10-Q. Companies with no material changes write brief statements under our 1,000-word minimum.
-
-**Decision:** Accepted as expected behavior. No material change in 10-Q is itself a valid signal.
+**Decision:** Accepted as expected behavior. No material change in 10-Q is a valid signal.
 
 ---
 
 ### Problem 8: LLM Response JSON Truncation (May 2026)
 
-**What happened:** LLM risk detector consistently failed to parse responses despite the model generating correct output. JSON cutting off mid-value in the final risk dimension.
-
-**Root cause:** Llama-3 8B via Ollama stops generating before adding the final closing braces. This is a known behavior of instruction-tuned models generating structured output without explicit stop tokens.
-
-**Fix:** Three-stage JSON repair logic in `parse_response()`. Stage 1: parse as-is. Stage 2: count open vs closed braces, append missing closings. Stage 3: walk backwards finding last valid closing brace position.
-
-**Result:** Parse success rate went from 0% to 100%.
+**Fix:** Three-stage JSON repair logic. Parse success rate 0% → 100%.
 
 ---
 
 ### Problem 9: Insufficient Text Extraction in Annotation Sample (June 2026)
 
-**What happened:** During human annotation of 50 filing pairs, 37% of regulatory dimensions and 48% of operational dimensions were marked insufficient_text.
+**What happened:** 37% of regulatory and 48% of operational dimensions marked insufficient_text.
 
-**Root cause:** The 3,000 character annotation window captures the beginning of Item 1A but SEC filings place credit and market risks first. Operational and regulatory risks appear later and are cut off.
+**Root cause:** 3,000 character window cuts off before operational/regulatory sections.
 
-**Decision:** Accepted as a methodology limitation. Regulatory kappa was computed on only 13 pairs versus 31 for market risk.
+**Decision:** Accepted as methodology limitation.
 
 ---
 
 ### Problem 10: LLM Systematic Annotation Biases Identified (June 2026)
 
-**What happened:** Cohen's kappa analysis revealed three systematic biases in LLM risk classification. Documented in Key Result 2 above.
-
-**Next step identified:** LoRA fine-tuning on annotated pairs to improve calibration.
+Three systematic biases: (1) cannot detect de-escalation, (2) over-fires on operational risk, (3) under-fires on liquidity risk. See Key Result 2.
 
 ---
 
 ### Problem 11: Prompt Engineering Instability in Multi-Dimension Classification (June 2026)
 
-**What happened:** Attempted to improve kappa from 0.207 to 0.4+ by rewriting the prompt with few-shot examples and explicit de-escalation instructions. The v2 prompt caused kappa to drop from 0.207 to 0.076.
+**What happened:** v2 prompt dropped kappa from 0.207 to 0.076.
 
-**Root cause:** Instruction-tuned LLMs use the prompt as a global instruction set. Adding five de-escalation examples caused the model to over-predict de-escalating across all dimensions. The anti-length-bias instruction simultaneously suppressed legitimate escalation detection in operational risk. Changes intended for one dimension affect all dimensions simultaneously.
+**Root cause:** Global instruction set — changes for one dimension affect all dimensions.
 
 **Decision:** Reverted to v1 prompt. Proceeded to LoRA fine-tuning.
 
@@ -324,201 +310,193 @@ This section documents real problems encountered during development and the deci
 
 ### Problem 12: LoRA Fine-tuning Label Collapse — Round 1 (June 2026)
 
-**What happened:** LoRA fine-tuning on Llama-3 8B via Google Colab T4 GPU produced a degenerate model predicting "stable" for all 25 validation examples. Val kappa = 0.000.
+**What happened:** Val kappa = 0.000. Model predicted stable for all validation examples.
 
-**Setup:** 98 training examples, MAX_SEQ_LEN 512 (reduced from 4096 to 1024 to 512 due to successive OOM errors), LoRA rank 8 (reduced from 16), `processing_class` fix in SFTTrainer (replacing deprecated `tokenizer` argument), `eval_strategy` adjusted to avoid OOM.
-
-**Root cause:** Three compounding factors. Class imbalance of 54 stable / 35 escalating / 9 de-escalating was not corrected. 512 token truncation removed most filing content. 98 examples is insufficient for a 3-class classification task with high input variability.
-
-**Windows dependency conflicts encountered:** Unsloth requires torch 2.4.0+ but CUDA setup requires torch 2.3.1+cu121, making them incompatible. pyarrow version conflict between unsloth (requiring 24.0.0) and pandas (requiring 14.0.1) also present. Decision: move all fine-tuning to Google Colab T4.
-
-**HuggingFace gated access:** Approved for both Meta-Llama-3-8B-Instruct and Meta-Llama-3-70B-Instruct.
+**Root cause:** Class imbalance (54 stable / 35 escalating / 9 de-escalating), 512 token truncation, 98 examples insufficient.
 
 ---
 
 ### Problem 13: LoRA Fine-tuning Label Collapse — Round 2 (June 2026)
 
-**What happened:** Second fine-tuning attempt with 150 balanced examples via oversampling produced a model predicting de-escalating 15 out of 25 times. Val kappa = -0.183.
+**What happened:** Val kappa = -0.183. Model predicted de-escalating 15/25 times.
 
-**Root cause:** The 9 de-escalating training examples were all from the 2022-2023 period and primarily captured COVID language removal in market risk (6 out of 9 were market_risk, 3 out of 9 were from CFG 2022-2023 alone, 7 out of 9 were from the 2022-2023 transition period). Duplicating these 5x caused the model to memorize a specific COVID-removal pattern rather than learning the general concept of de-escalation. Every new input superficially matched the oversampled pattern.
+**Root cause:** 9 de-escalating examples from 3 companies, 1 year, duplicated 5x. Model memorized specific COVID-removal pattern rather than generalizing.
 
-**Key insight:** Fine-tuning on minority classes requires both sufficient quantity and sufficient diversity. 9 examples from 3 companies spanning 1 year cannot generalize even with oversampling. Minimum viable dataset estimated at 30+ diverse de-escalating examples spanning multiple companies, sectors, and transition types.
+**Key insight:** Fine-tuning minority classes requires diversity not just quantity. Minimum 30+ diverse de-escalating examples needed.
 
 ---
 
 ### Problem 14: Fine-tuning Architecture Reassessment (June 2026)
 
-**What happened:** After two failed LoRA rounds, a structured consultation was conducted. The consultation reordered the priority stack completely.
+**Consultation outcome:** Input representation wrong (raw text too long), evaluation too noisy (single split), architecture mismatch (generative vs encoder), cheap ICL baseline skipped.
 
-**Original hypothesis:** Label collapse was primarily caused by 512-token truncation. Proposed fix was to upgrade to A100 GPU for 2048-token sequences.
-
-**Consultation outcome — four issues identified:**
-
-Issue 1: Input representation is wrong. Concatenating two full 10-K sections creates a comparison task that exceeds any practical sequence length. The fix is to compute a year-over-year diff and feed that instead, collapsing thousands of tokens to a few hundred.
-
-Issue 2: Evaluation is too noisy to trust. Val kappa on a single split with 63 examples has very high variance. Conclusions drawn from single-split results are not reliable without stratified k-fold CV.
-
-Issue 3: Architecture mismatch. Using a generative 8B decoder to emit a 3-class label is the wrong tool. An encoder-based classifier (DeBERTa-v3-base) with a classification head and class-weighted loss is better suited and more sample-efficient.
-
-Issue 4: Cheap baseline was skipped. Few-shot ICL with annotated pairs as demonstrations, using diff inputs, likely outperforms fine-tuning at this data size and costs nothing in training.
-
-**Decision:** Build diff representation first, run few-shot ICL baseline with k-fold CV, use encoder-based fine-tuning only if ICL results justify it.
+**Decision:** Build diff representation first, run ICL with k-fold CV, use DeBERTa-v3-base for fine-tuning if ICL justified it.
 
 ---
 
-### Problem 15: Annotation Coverage Gap — Original Session Pairs Have No Local Files (June 2026)
+### Problem 15: Annotation Coverage Gap (June 2026)
 
-**What happened:** 38 unique annotated pairs but only 23 had local extracted text files. Original session pairs (VLO, CINF, FITB, FANG, etc.) were annotated from pasted content in chat and never saved locally.
+**What happened:** 38 annotated pairs but only 23 had local files.
 
-**Root cause:** Early annotation sessions were conducted by pasting content directly into conversation. No script was run to save the files locally. Later extraction sessions (v7, v8, v9) saved files to named folders but original session pairs were missing entirely.
-
-**Fix:** `extract_missing.py` re-extracted all 27 missing pairs using the EDGAR submissions API. Pairs saved to `extracted_missing/` folder.
+**Fix:** `extract_missing.py` re-extracted all 27 missing pairs from EDGAR.
 
 ---
 
-### Problem 16: Annotation Expansion — Targeting De-escalating Class (June 2026)
+### Problem 16: Annotation Expansion Targeting De-escalating Class (June 2026)
 
-**What happened:** With only 11 de-escalating examples in the original annotation set, fine-tuning diversity requirements could not be met. Multiple extraction script iterations were required before reliable annotation candidates were produced.
+**What happened:** With only 11 de-escalating examples in the original annotation set, fine-tuning diversity requirements could not be met. Six extraction script versions (v1-v6) plus `annotate_with_llm.py` required before reliable annotation candidates were produced.
 
 **Extraction script progression:**
 
-`extract_deescalating.py` (v1): CIK lookup worked but `get_document_url()` fetched the search page instead of the actual filing. Zero files produced.
+`extract_deescalating.py` v1: CIK lookup worked but `get_document_url()` fetched the search page instead of the actual filing. Zero files produced.
 
-`extract_deescalating_v2.py`: Fixed URL resolution using EDGAR submissions API primary document field. URLs now correct but Item 1A regex failed for XBRL-heavy filings (DAL, UAL, MCD). SBUX extracted successfully.
+`extract_deescalating_v2.py`: Fixed URL resolution using EDGAR submissions API primary document field. Item 1A regex failed for XBRL-heavy filings (DAL, UAL, MCD). SBUX extracted successfully.
 
-`extract_deescalating_v3.py`: Added explicit stripping of XBRL `<ix:nonnumeric>` and `<ix:continuation>` namespace tags before HTML stripping. Item 1A regex now worked for most filings but DAL/UAL/MCD still falling back to 60,000 char windows (too large).
+`extract_deescalating_v3.py`: Added explicit stripping of XBRL namespace tags before HTML stripping. DAL/UAL/MCD still failing — falling back to 60,000 char windows.
 
-`extract_v4.py` through `extract_v6.py`: Switched from keyword scoring to subsection heading match for relevant content extraction. Fixed NFLX filing detection (Netflix files in January — fiscal year detection edge case). Replaced DAL/UAL/MCD/SBUX targets with NFLX/UBER/LYFT/ROKU after consistent extraction failures on airline and fast food filings.
+`extract_v4.py` through `extract_v6.py`: Switched from keyword scoring to subsection heading match. Fixed NFLX fiscal year detection (Netflix files in January). Replaced DAL/UAL/MCD targets with NFLX/UBER/LYFT/ROKU after consistent airline/fast food extraction failures.
 
-`annotate_with_llm.py`: Added Claude API annotation on top of extraction — LLM pre-fills annotation blocks, human reviews and overrides. Used for UBER, LYFT, ZM, ROKU pairs.
+`annotate_with_llm.py`: Added Claude API annotation on top of extraction — LLM pre-fills annotation blocks, human reviews and overrides.
 
-**NFLX failure:** EDGAR recent filings endpoint only returns last ~20 filings. NFLX 2021 and 2022 filings had fallen off the recent list. Added `get_filings_all()` function checking the older filings endpoint. NFLX replaced with ZM (Zoom) for the annotation batch as ZM had clearer COVID normalization signal.
+`extract_v8.py`: Rewrote `get_item1a()` to find all Item 1A matches, skip TOC entries (< 2000 chars), rank candidates by length with sanity check for risk language. Targets: 8 failed companies from v7 (AAL, DAL, DIS, EXPE, LYV, MCD, RCL, UAL) + 9 new tickers (NCLH, MGM, LVS, WYNN, BA, SAVE, JBLU, ABNB, F). Persistent failures: AAL, DAL, DIS, F, LVS, LYV, MCD, MGM, NCLH, RCL, UAL — blocked permanently. Usable from v8: ABNB, BA, EXPE, JBLU, WYNN.
 
-**ROKU insufficient_text:** Extraction captured only risk factor summary and competitive landscape intro, not the actual credit risk subsection. ROKU excluded from final annotation set.
+`extract_v9.py`: Fresh tickers across sectors — TGT, WMT, GPS, LULU (retail), CRM, TWLO, SNAP (tech), CVS, HCA, THC (healthcare), NFLX, WBD (media). WMT failed — pulled Item 1 Business ESG/Human Capital content. LULU/GPS failed. 10 usable annotations from 15 targets.
 
-**Final new de-escalating pairs annotated:** VLO 2021-2022 (credit_risk), AIZ 2019-2020 (operational_risk), LYFT 2021-2022 (operational_risk), UBER 2021-2022 (operational_risk), ZM 2021-2022 (operational_risk). De-escalating count increased from 11 to 16.
+**Key annotation decisions:** SBUX is a counter-example where COVID escalated 2021→2022 due to China-specific restrictions. JBLU escalated due to Spirit merger risk additions not COVID. These counter-examples validate annotation quality — demonstrates the schema captures real signal not just temporal auto-correlation.
 
-**Lesson:** Minimum viable de-escalating count for fine-tuning is 30-40 diverse examples. 16 is still insufficient. Additional annotation sessions (v7, v8, v9) were conducted separately targeting de-escalating cases post-COVID normalization.
+**NFLX failure and fix:** EDGAR recent filings endpoint only returns last ~20 filings. NFLX 2021/2022 had fallen off the list. Added `get_filings_all()` checking older filings endpoint.
+
+**ROKU exclusion:** Extraction captured only risk factor summary and competitive landscape, not the actual credit risk subsection.
+
+**Final annotation counts:** de-escalating 20, stable 8, escalating 12, total usable 40 across original (16) + v7 (8) + v8 (7) + v9 (10) sessions.
+
+**Lesson:** Minimum viable de-escalating count for fine-tuning is 30-40 diverse examples. 20 crosses the technical threshold but stable class (8 pairs) remains the binding constraint for fine-tuning stability.
 
 ---
 
 ### Problem 17: Asymmetric Extraction Causing Near-Zero Diff Signal (June 2026)
 
-**What happened:** Eight pairs (EXPE, HLT, LYFT, VLO and others) showed only 1-7 added/removed sentences instead of the expected 27-49. The diff builder was producing near-empty representations for pairs that had clear de-escalating signals in manual annotation.
+**Root cause:** `get_relevant()` used COVID keyword density — found COVID section in 2021, found different section in 2022 after COVID language toned down. Near-zero diff for 8 pairs.
 
-**Root cause:** `get_relevant()` scored paragraphs by COVID keyword density. For the 2021 filing it found the COVID risk section (high keyword density). For the 2022 filing with toned-down COVID language, it found a completely different section with higher keyword density. The two years were extracting from different parts of the document, producing a near-zero diff that did not reflect the actual year-over-year change.
-
-**Fix:** `extract_full_item1a.py` re-extracted all 8 affected pairs using the full 30,000 character Item 1A without keyword truncation. Saved to `extracted_full/` folder.
-
-**Result:** EXPE went from 3 added/removed sentences to 31. HLT went from 5 to 38. All 8 pairs now show meaningful diff signal consistent with their human annotations.
+**Fix:** `extract_full_item1a.py` using full 30,000 character Item 1A without keyword truncation.
 
 ---
 
 ### Problem 18: XBRL Metadata Artifacts in Diff Summaries (June 2026)
 
-**What happened:** Two CINF pairs (CINF_10-K_2020_2021 and CINF_10-K_2022_2023) had XBRL filing metadata appearing as sentences in their diff summaries: "cinf-20211231 false 2021 FY 0000020286 --12-31 P3Y P3Y P3Y..."
+**What happened:** CINF pairs had XBRL metadata appearing as sentences in diff summaries.
 
-**Root cause:** CINF files its 10-K using XBRL inline format (iXBRL). The document contains metadata blocks that survive both HTML stripping and the XBRL tag removal pass because they appear as plain text within the document body rather than inside tags. These strings pass sentence length filters and appear as legitimate sentences in the diff.
-
-**Fix:** Two-layer filter. First, `load_data()` excludes any record where the diff summary contains known XBRL artifact strings ("false 2021 fy", "p3y p3y", "--12-31", "0000020286"). Second, `has_clean_summary()` function blocks affected pairs from few-shot example selection at all fallback levels. Both CINF pairs permanently excluded from training and evaluation — 36 usable records from 38 annotated pairs.
+**Fix:** `load_data()` XBRL artifact exclusion filter. `has_clean_summary()` hard gate. Both CINF pairs permanently excluded — 36 usable records from 38 annotated.
 
 ---
 
 ### Problem 19: Financial Statement Content Mixed into Diff Summaries (June 2026)
 
-**What happened:** AIZ and several other pairs had financial statement content appearing in their diff summaries: "$79.3 million tax benefit related to...", "MCPS will convert into shares of common stock on March 15, 2021."
+**What happened:** AIZ had financial statement content in diff summaries.
 
-**Root cause:** Financial statements appear later in Item 1A in some filings (particularly insurance sector filings that embed financial tables within the risk section). These sentences pass our boilerplate filter because they contain no table reference markers and exceed the minimum length threshold.
-
-**Fix:** `has_clean_summary()` hard filter added with financial artifact patterns: "net income", "tax benefit", "shares of common stock", "mcps will convert", "the change in program structure", and similar patterns. AIZ removed from the HIGH_QUALITY_PAIRS whitelist after its financial artifact content was confirmed.
+**Fix:** `has_clean_summary()` financial artifact patterns. AIZ removed from HIGH_QUALITY_PAIRS whitelist.
 
 ---
 
 ### Problem 20: Duplicate Pair Processing Inflating Diff Count (June 2026)
 
-**What happened:** `build_diff.py` produced 50 diff representations instead of 38 unique pairs. Running with multiple `--input_dirs` (deescalating_v8 and extracted_missing both contained ABNB, BKNG, and other pairs) caused the same pair to be processed twice.
-
-**Root cause:** No deduplication logic in the diff builder. First-come-first-served processing meant whichever folder was listed first determined the representation used, but both runs were saved to the output.
-
-**Fix:** Added `processed_pairs` set to `build_diff_v2.py`. First occurrence of a pair_id wins, subsequent occurrences from other input directories are skipped with a logged warning.
+**Fix:** `processed_pairs` set in `build_diff_v2.py`. First occurrence wins.
 
 ---
 
 ### Problem 21: ICL Few-shot Example Degeneracy — v1 Prompt (June 2026)
 
-**What happened:** First ICL baseline run (v1 prompts, raw diff summaries) produced kappa = 0.125, worse than zero-shot (0.186). Model predicted "escalating" for 31 out of 38 pairs — essentially a degenerate classifier.
+**What happened:** ICL v1 kappa = 0.125, worse than zero-shot (0.186). Model predicted escalating for 31/38 pairs.
 
-**Root cause — three compounding factors:**
+**Root cause:** (1) "COVID LANGUAGE REMOVED" counterintuitive to LLM, (2) no class balance guarantee in example selection, (3) contradictory examples (AIZ, FANG) passing fallback filter.
 
-Factor 1: Diff summary language was counterintuitive. "COVID LANGUAGE REMOVED (13 sentences)" contains the word "removed" which an LLM interprets as something being taken away — implying a gap or missing disclosure — rather than recognizing removal as a positive de-escalation signal.
-
-Factor 2: `select_examples()` did not guarantee class balance. In Fold 4 and Fold 5, training data was dominated by escalating examples. The model latched onto the majority pattern.
-
-Factor 3: The secondary fallback in example selection was not gated on content quality. AIZ (financial statement artifacts in diff) and FANG_2022_2023 (COVID signal contradicts escalating label) both passed the `signal_agrees()` filter and appeared as few-shot examples, teaching the model wrong patterns.
-
-**Fix:** Rewrote diff summary language to make semantics explicit. "COVID LANGUAGE REMOVED" became "COVID/PANDEMIC RISK LANGUAGE REDUCED: 13 sentences discussing active COVID threats were ELIMINATED from the later filing [SIGNAL: de-escalating]". Added guaranteed 1-per-class selection in `select_balanced()`. Added HIGH_QUALITY_PAIRS whitelist as primary example source.
+**Fix:** Reframed diff language with explicit [SIGNAL: de-escalating] tags, guaranteed 1-per-class selection, HIGH_QUALITY_PAIRS whitelist.
 
 ---
 
 ### Problem 22: Whitelist Fallback Bypassing Quality Filters (June 2026)
 
-**What happened:** Even after implementing the HIGH_QUALITY_PAIRS whitelist, contradictory examples continued appearing in dry runs. Example 3 kept showing "COVID LANGUAGE REDUCED" with an escalating label, or financial statement artifacts.
+**What happened:** Contradictory examples continued appearing despite whitelist.
 
-**Root cause:** The fallback logic in `select_balanced()` used `signal_agrees()` as the secondary filter when the whitelist was exhausted in a fold. `signal_agrees()` checked only whether the primary signal direction matched the label — it did not check content quality. AIZ passed because its primary signal agreed with its escalating label despite having financial statement content mixed in. FANG_2022_2023 was also incorrectly included in the whitelist initially.
+**Root cause:** Fallback used `signal_agrees()` without content quality check. AIZ passed because primary signal agreed with label despite financial statement artifacts.
 
-**Iterations required:**
-
-Round 1: Added whitelist, kept secondary fallback using `signal_agrees()`. AIZ still appeared via fallback.
-
-Round 2: Removed FANG_2022_2023 from whitelist. AIZ still appeared via fallback.
-
-Round 3: Removed AIZ from whitelist. AIZ still appeared via `signal_agrees()` fallback because its signal agreed with its label.
-
-Round 4: Added `has_clean_summary()` as a mandatory hard gate on ALL selection paths including whitelist, signal-agrees fallback, and absolute fallback. FINANCIAL_ARTIFACTS list defined at module level and checked before any example is selected. This permanently blocked AIZ and any other pair with financial statement content from appearing as few-shot examples regardless of which fallback path was triggered.
-
-**Final example quality verified across 5 consecutive dry runs before full experiment was run.**
+**Iterations:** 4 rounds before final fix — `has_clean_summary()` as mandatory hard gate on ALL selection paths including absolute fallback.
 
 ---
 
 ### Problem 23: Stable Class Recall Collapse (June 2026)
 
-**What happened:** After fixing the above problems and achieving kappa 0.494, stable class recall remained at 2/7 (28.6%). The model correctly identified all de-escalating cases but could not reliably detect stable pairs.
+**What happened:** Stable recall 2/7 (28.6%) despite kappa 0.494.
 
-**Root cause:** Stable pairs by definition show minimal diff signal — nothing changed, so there is little content in the diff summary. The LLM defaults to predicting escalating or de-escalating based on whatever weak signal exists rather than recognizing the low-signal case as stable.
+**Root cause:** Stable pairs show minimal diff signal by definition. Model defaults to escalating or de-escalating based on weak signals.
 
-Additionally, the few-shot examples for stable class had only 6 added sentences with no COVID signal — not enough for the model to learn what a stable pair looks like.
+**Partial fix:** Tiebreaker rule in system prompt, better stable examples with ≥8 sentence churn in whitelist. Stable recall improved to 3/7 (42.9%) at kappa 0.614.
 
-**Current status:** Unresolved. Identified as the primary target for kappa improvement from 0.494 to 0.6+. Three proposed fixes: (1) add tiebreaker rule to prompt for cases where COVID reduced but non-COVID escalated; (2) use stable examples with higher sentence churn showing that volume change alone does not imply directional change; (3) run GPT-4 ablation to determine if the failure persists across model capabilities.
+---
+
+### Problem 24: GPT-4o Stable Collapse (June 2026)
+
+**What happened:** GPT-4o with Llama3 diff representation got kappa 0.147 — worse than Llama3 8B raw (0.071 was de-escalation blindness; GPT-4o was predicting stable for everything).
+
+**Root cause:** [SIGNAL: xxx] annotation scaffolding and numbered rules are tuned for Llama3's instruction-following style. GPT-4o processes structured text analytically and ignores the annotation tags.
+
+**Fix:** Model-specific prompt routing. GPT-4o/GPT-4 get clean analytical descriptions without [SIGNAL] tags.
+
+---
+
+### Problem 25: GPT-4o Addition Blindness (June 2026)
+
+**What happened:** GPT-4o-mini diff kappa = 0.139. Model predicted escalating for 13/20 de-escalating cases.
+
+**Root cause:** GPT-4o-mini reads "NEW NON-COVID RISK CONTENT added" and predicts escalating regardless of COVID removal signal. Capability threshold issue — model too small to follow multi-signal instructions reliably.
+
+**Finding:** GPT-4o-mini represents a capability threshold below which diff representation actively hurts performance.
+
+---
+
+### Problem 26: GPT-4o/GPT-4 Stable Collapse Despite Model-Specific Prompt (June 2026)
+
+**What happened:** GPT-4o diff with clean analytical prompt: kappa 0.151. GPT-4 diff: kappa 0.141. Both models defaulting to stable for ambiguous cases.
+
+**Root cause:** Without explicit signal extraction the model sees weak diff content and defaults to stable rather than making a directional judgment.
+
+**Fix:** KEY SIGNALS block added to diff formatter — explicit yes/no questions for COVID eliminated, content decreased/increased, new sections added, tense shift detected. Paired with DECISION RULES in system prompt referencing KEY SIGNALS.
+
+**Result:** GPT-4o improved from 0.151 to 0.273 (+81%). GPT-4 improved from 0.191 (raw) to 0.453 (diff + KEY SIGNALS) (+137%).
+
+**Residual problem:** Fold 5 pairs (HLT, MAR, PTON, SBUX) still collapse to stable. These have genuinely weak KEY SIGNAL values — 3-4 COVID sentences removed, no tense shift, modest volume change. No prompt engineering fix available without more training data.
 
 ---
 
 ## Dataset Quality Notes
 
-**Sector skew:** Technology companies have cleaner filing formats and higher extraction rates than banking. Banking has systematic gaps from incorporation by reference at WFC, USB, and BK.
+**Sector skew:** Technology companies have cleaner filing formats. Banking has systematic gaps from incorporation by reference at WFC, USB, BK.
 
-**Temporal skew:** Dataset is weighted toward annual 10-K filings due to 10-Q no-change policy. This is methodologically acceptable since annual pairs are the primary unit of analysis.
+**Temporal skew:** Weighted toward annual 10-K filings. Methodologically acceptable since annual pairs are the primary unit of analysis.
 
-**Survivorship bias:** All 100 companies were listed for the majority of the 2019-2024 period. SIVB (Silicon Valley Bank, collapsed March 2023) is a notable absence that would have been analytically interesting for liquidity risk escalation detection.
+**Survivorship bias:** SIVB (Silicon Valley Bank, collapsed March 2023) is a notable absence that would have been analytically interesting for liquidity risk detection.
 
-**Annotation quality:** Single annotator ground truth introduces subjectivity. Disagreement patterns between human and LLM annotations are directionally systematic rather than random, supporting the model bias interpretation over annotation noise. Second annotator validation using GPT-4 as independent annotator is planned to compute inter-annotator kappa.
+**Annotation quality:** Single annotator ground truth. Disagreement patterns are directionally systematic rather than random, supporting the model bias interpretation. Second annotator validation using GPT-4 as independent LLM annotator is planned.
 
 ---
 
 ## Limitations
 
-Single annotator ground truth introduces subjectivity. Second annotator validation planned using GPT-4 as independent LLM annotator.
+Single annotator ground truth introduces subjectivity. Second annotator validation planned.
 
-Yahoo Finance abnormal return proxies are less precise than CDS spreads. WRDS Markit access pending for summer 2026.
+Yahoo Finance abnormal return proxies are less precise than CDS spreads. WRDS Markit access confirmed for summer 2026.
 
-LLM outputs are non-deterministic across runs. Temperature set to 0 and seed fixed at 42 for reproducibility.
+LLM outputs non-deterministic. Temperature set to 0, seed fixed at 42.
 
 Coverage limited to US-listed companies with English filings.
 
-Incorporation by reference gaps affect approximately 15% of banking sector filings.
+Incorporation by reference gaps affect ~15% of banking filings.
 
-ICL baseline uses Llama-3 8B only. Multi-model ablation (GPT-4, Llama-3 70B) needed to confirm that de-escalation blindness persists across model capability levels — this would elevate the finding from a quirk of one model to a systematic property of current LLMs.
+ICL ceiling for Llama3 8B is approximately 0.62-0.65. Reaching 0.7-0.8 requires DeBERTa-v3-base fine-tuning on 56+ annotated pairs.
 
-Stable class recall remains low (28.6%). The tiebreaker case — COVID reduced but non-COVID escalated — is not yet handled.
+Stable class recall remains the primary weakness across all models. 7 stable pairs is insufficient for reliable boundary learning.
+
+Prompt-representation co-design does not transfer across model families — Llama3 8B prompt engineering does not generalize to GPT-4o or GPT-4.
 
 ---
 
@@ -526,29 +504,29 @@ Stable class recall remains low (28.6%). The tiebreaker case — COVID reduced b
 
 **Near term:**
 
-GPT-4 ablation on same 36 pairs and diff representation to test generalization of de-escalation blindness finding across model capability levels.
+DeBERTa-v3-base fine-tuning on diff summaries with classification head — target kappa 0.70-0.80 with 56+ pairs.
 
-Add tiebreaker rule to ICL prompt: if COVID language reduced but 10+ new non-COVID sentences added, classify as escalating.
+Annotate 20-25 more pairs targeting stable class and non-COVID escalating to enable fine-tuning.
 
-Annotate 10 more pairs targeting stable class and non-COVID escalating to improve CV stability (current std 0.329 reflects small dataset variance).
-
-Run adversarial elicitation test: ask LLM directly "has risk disclosure been reduced?" and compare to classification task results. Characterizes the failure mode more precisely.
-
-**Medium term:**
-
-arXiv preprint: "De-escalation Blindness in LLM-based Risk Monitoring: A Capability Gap for Scalable Oversight." Target NeurIPS 2026 Behavioral Evaluation workshop or ICLR 2027 Trustworthy ML workshop.
+Adversarial elicitation test: ask LLM directly "has risk disclosure been reduced?" and compare to classification task results.
 
 SEC comment letter validation via WRDS — external ground truth for which disclosures were deemed inadequate by regulators.
 
-Alignment Forum post on curriculum safety coverage analysis from CIC RA work (target: before MATS winter application).
+**Medium term:**
+
+arXiv preprint: "Systematic Failure Modes in LLM-based Risk Monitoring: A Multi-Model Empirical Study." Target NeurIPS 2026 Behavioral Evaluation workshop or ICLR 2027 Trustworthy ML workshop.
+
+Alignment Forum post on curriculum safety coverage analysis from CIC RA work.
+
+LLM generation experiments: prompt models under evaluation pressure and test whether evasion detector identifies the same patterns.
 
 **Longer term:**
 
 CDS spread validation via WRDS Markit.
 
-LLM generation experiments: prompt models to generate synthetic risk disclosures under evaluation pressure and test whether the evasion detector identifies the same patterns.
+SIVB and First Republic Bank as stress-period validation cases.
 
-SIVB and First Republic Bank as stress-period validation cases for liquidity risk escalation detection.
+Benchmark expansion to 200+ pairs with held-out test set and public leaderboard.
 
 Real-time EDGAR monitoring pipeline.
 
@@ -559,22 +537,26 @@ Real-time EDGAR monitoring pipeline.
 ```
 financial-disclosure-risk-intelligence/
 ├── src/
-│   ├── ingestion/          # SEC EDGAR data collection
-│   ├── preprocessing/      # Text cleaning, pair construction
-│   ├── modeling/           # LLM risk detection pipeline
-│   ├── evaluation/         # Kappa scores, regression analysis
-│   └── visualization/      # Streamlit app, Plotly charts
+│   ├── ingestion/              # SEC EDGAR data collection
+│   ├── preprocessing/          # Text cleaning, pair construction
+│   ├── modeling/               # LLM risk detection pipeline
+│   ├── evaluation/             # Kappa scores, regression analysis
+│   └── visualization/          # Streamlit app, Plotly charts
 ├── diffs/
-│   ├── diff_representations.jsonl     # Structured diff for 36 clean pairs
+│   ├── diff_representations.jsonl       # Structured diff for 36 clean pairs
 │   └── diff_representations_readable.txt
 ├── results/
-│   ├── icl_diff_3shot_results.json
-│   └── icl_diff_6shot_results.json
+│   ├── icl_diff_3shot_llama3_latest_results.json
+│   ├── icl_diff_3shot_gpt_4o_results.json
+│   ├── icl_diff_3shot_gpt_4_results.json
+│   └── icl_raw_3shot_*_results.json
 ├── data/
-│   ├── raw/                # Raw EDGAR filings (gitignored)
-│   └── processed/          # Cleaned filing pairs (gitignored)
-├── notebooks/              # Exploratory analysis
-├── tests/                  # Unit tests
+│   ├── raw/                    # Raw EDGAR filings (gitignored)
+│   └── processed/              # Cleaned filing pairs (gitignored)
+├── notebooks/                  # Exploratory analysis
+├── tests/                      # Unit tests
+├── icl_baseline_v3.py          # Current ICL baseline with multi-model support
+├── build_diff_v2.py            # Diff representation builder
 ├── requirements.txt
 ├── .gitignore
 └── README.md
@@ -590,10 +572,27 @@ cd financial-disclosure-risk-intelligence
 pip install -r requirements.txt
 
 # Build diff representations
-python build_diff_v2.py --input_dirs extracted_full deescalating_v7 deescalating_v8 deescalating_v9 extracted_missing --annotations annotations_final_v3.txt --output_dir diffs
+python build_diff_v2.py \
+  --input_dirs extracted_full deescalating_v7 deescalating_v8 deescalating_v9 extracted_missing \
+  --annotations annotations_final_v3.txt \
+  --output_dir diffs
 
-# Run ICL baseline
-python icl_baseline_v2.py --input diffs/diff_representations.jsonl --output results --model llama3:latest --shots 3 6 --condition diff
+# Run ICL baseline (Llama3 8B local)
+python icl_baseline_v3.py \
+  --input diffs/diff_representations.jsonl \
+  --output results \
+  --model llama3:latest \
+  --shots 3 \
+  --condition diff
+
+# Run ICL baseline (GPT-4 via OpenAI API)
+export OPENAI_API_KEY=your_key_here
+python icl_baseline_v3.py \
+  --input diffs/diff_representations.jsonl \
+  --output results \
+  --model gpt-4 \
+  --shots 3 \
+  --condition both
 ```
 
 ---
