@@ -466,6 +466,23 @@ Three systematic biases: (1) cannot detect de-escalation, (2) over-fires on oper
 
 **Residual problem:** Fold 5 pairs (HLT, MAR, PTON, SBUX) still collapse to stable. These have genuinely weak KEY SIGNAL values — 3-4 COVID sentences removed, no tense shift, modest volume change. No prompt engineering fix available without more training data.
 
+Problem 27: Elicitation vs Classification Framing (June 2026)
+
+Hypothesis: GPT-4 knows de-escalation happened but classification framing suppresses it.
+Test: Direct YES/NO elicitation — "has risk disclosure been reduced?"
+Result: Elicitation recall 7/20 (35%) vs ICL diff recall 12/20 (60%).
+
+Finding: The ICL classification task with KEY SIGNALS OUTPERFORMS direct elicitation.
+The model does not know de-escalation happened — it genuinely fails to detect it
+from raw diff content. The KEY SIGNALS intervention does real cognitive work by
+decomposing detection into explicit binary sub-questions, compensating for a
+genuine representational capability gap. This is not evaluation-framing suppression;
+it is a structured representation contribution.
+
+Alignment implication: LLM oversight monitors cannot detect institutional de-escalation
+from unstructured text even when asked directly. The representation design is load-bearing,
+not optional.
+
 ---
 
 ## Dataset Quality Notes

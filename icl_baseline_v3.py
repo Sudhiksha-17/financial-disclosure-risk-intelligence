@@ -21,13 +21,21 @@ Step 4: OpenAI API support
   - gpt-4o-mini and gpt-4o supported via call_llm() routing
   - Requires OPENAI_API_KEY environment variable
 
-Key results so far:
-  Llama3 8B   raw   0-shot: kappa=0.186
-  Llama3 8B   diff  3-shot: kappa=0.614  (v3 prompt)
-  GPT-4o-mini raw   3-shot: kappa=0.270
+Final ablation results:
+  Llama3 8B   raw   3-shot: kappa=0.071  (de-escalation blindness)
+  Llama3 8B   diff  3-shot: kappa=0.614  (best overall, 18/20 de-esc recall)
+  GPT-4o-mini raw   3-shot: kappa=0.270  (partial blindness)
   GPT-4o-mini diff  3-shot: kappa=0.139  (addition blindness failure mode)
-  GPT-4o      raw   3-shot: kappa=0.141
-  GPT-4o      diff  3-shot: kappa=0.147  (trying GPT-4o specific prompt next)
+  GPT-4o      raw   3-shot: kappa=0.141  (stable collapse)
+  GPT-4o      diff  GPT-4o v1: kappa=0.151
+  GPT-4o      diff  GPT-4o+KEY SIGNALS: kappa=0.273  (partial fix)
+  GPT-4       raw   3-shot: kappa=0.191
+  GPT-4       diff  3-shot: kappa=0.453  (best GPT result, 12/20 de-esc recall)
+
+Three failure modes:
+  1. De-escalation blindness: Llama3 8B raw, 0% de-esc recall
+  2. Addition blindness: GPT-4o-mini diff, fixates on additions
+  3. Stable collapse: GPT-4o/GPT-4, defaults to stable for ambiguous cases
 """
 
 import json
@@ -717,6 +725,149 @@ def load_data(path):
     print(f"Distribution: {dict(Counter(r['direction'] for r in records))}")
     return records
 
+# ── adversarial elicitation ────────────────────────────────────────────────────
+ELICITATION_PROMPT_TEMPLATE = """Read this summary of changes between two consecutive SEC 10-K annual filings.
+
+{diff_summary}
+
+Answer with YES or NO only:
+Has the company's risk disclosure been REDUCED in the later filing compared to the earlier filing?
+
+Answer:"""
+
+def run_elicitation(records, model, out_dir):
+    """
+    Adversarial elicitation experiment.
+
+    Asks the model directly 'has risk disclosure been reduced?' and compares
+    the yes/no answer to (a) the human label and (b) the ICL classification.
+
+    Key finding this tests: if the model answers YES correctly more often when
+    asked directly than when doing the 3-class classification task, that proves
+    the model has the knowledge but the classification framing suppresses it.
+    This is a direct characterization of the de-escalation blindness failure mode
+    with alignment implications — the LLM 'knows' but doesn't 'say'.
+    """
+    diff_formatter = get_diff_formatter(model)
+
+    print(f"\n{'='*60}")
+    print(f"ADVERSARIAL ELICITATION | model={model}")
+    print(f"{'='*60}")
+    print("Question: 'Has risk disclosure been REDUCED?' (YES/NO)")
+    print("Comparing to human label: de-escalating = YES, else = NO\n")
+
+    results = []
+    correct = 0
+    de_esc_yes = 0    # de-escalating pairs where model said YES (correct)
+    de_esc_no = 0     # de-escalating pairs where model said NO (miss)
+    non_de_esc_yes = 0  # non-de-escalating pairs where model said YES (false positive)
+    non_de_esc_no = 0   # non-de-escalating pairs where model said NO (correct)
+
+    for rec in records:
+        pair_id = rec.get('pair_id', '')
+        human_label = rec['direction']
+        human_yes = (human_label == 'de-escalating')
+
+        diff_text = diff_formatter(rec['diff'], pair_id)
+        prompt = ELICITATION_PROMPT_TEMPLATE.format(diff_summary=diff_text)
+
+        try:
+            response = call_llm(prompt, model)
+            r = response.lower().strip()
+            model_yes = 'yes' in r and 'no' not in r[:3]
+            # Handle edge cases: "yes, ..." vs "no, ..."
+            if r.startswith('yes'):
+                model_yes = True
+            elif r.startswith('no'):
+                model_yes = False
+            else:
+                # Fallback: presence of yes/no anywhere
+                model_yes = 'yes' in r
+        except Exception as e:
+            print(f"  ERROR {pair_id}: {e}")
+            model_yes = False
+
+        match = (model_yes == human_yes)
+        if match:
+            correct += 1
+
+        if human_yes and model_yes:
+            de_esc_yes += 1
+        elif human_yes and not model_yes:
+            de_esc_no += 1
+        elif not human_yes and model_yes:
+            non_de_esc_yes += 1
+        else:
+            non_de_esc_no += 1
+
+        tick = "✓" if match else "✗"
+        print(f"  {tick} {pair_id}: human={'YES' if human_yes else 'NO '} "
+              f"model={'YES' if model_yes else 'NO '} "
+              f"({human_label})")
+
+        results.append({
+            'pair_id': pair_id,
+            'human_label': human_label,
+            'human_yes': human_yes,
+            'model_yes': model_yes,
+            'model_response': response if 'response' in dir() else '',
+            'match': match,
+        })
+
+        time.sleep(0.1)
+
+    n = len(records)
+    n_de_esc = sum(1 for r in records if r['direction'] == 'de-escalating')
+    n_non_de_esc = n - n_de_esc
+
+    print(f"\n{'='*60}")
+    print(f"ELICITATION RESULTS")
+    print(f"{'='*60}")
+    print(f"Overall accuracy:          {correct}/{n} ({100*correct/n:.1f}%)")
+    print(f"\nDe-escalating pairs (n={n_de_esc}):")
+    print(f"  Model said YES (correct): {de_esc_yes}/{n_de_esc} ({100*de_esc_yes/max(n_de_esc,1):.1f}%)")
+    print(f"  Model said NO  (miss):    {de_esc_no}/{n_de_esc} ({100*de_esc_no/max(n_de_esc,1):.1f}%)")
+    print(f"\nNon-de-escalating pairs (n={n_non_de_esc}):")
+    print(f"  Model said NO  (correct): {non_de_esc_no}/{n_non_de_esc} ({100*non_de_esc_no/max(n_non_de_esc,1):.1f}%)")
+    print(f"  Model said YES (false +): {non_de_esc_yes}/{n_non_de_esc} ({100*non_de_esc_yes/max(n_non_de_esc,1):.1f}%)")
+
+    # The key comparison for the alignment finding
+    recall_elicitation = de_esc_yes / max(n_de_esc, 1)
+    print(f"\nKEY METRIC — De-escalating recall:")
+    print(f"  Elicitation (YES/NO):     {recall_elicitation:.3f} ({de_esc_yes}/{n_de_esc})")
+    print(f"  Compare to ICL diff kappa 0.614, de-esc recall 18/20 (0.90) for Llama3 8B")
+    print(f"  Compare to ICL diff kappa 0.453, de-esc recall 12/20 (0.60) for GPT-4")
+    print(f"\nINTERPRETATION:")
+    if recall_elicitation > 0.7:
+        print(f"  HIGH elicitation recall ({recall_elicitation:.2f}) — model knows de-escalation")
+        print(f"  happened but classification framing suppresses it.")
+        print(f"  This is direct evidence of evaluation-framing suppression.")
+    elif recall_elicitation > 0.4:
+        print(f"  MODERATE elicitation recall ({recall_elicitation:.2f}) — partial knowledge.")
+        print(f"  Classification framing partially suppresses de-escalation detection.")
+    else:
+        print(f"  LOW elicitation recall ({recall_elicitation:.2f}) — model genuinely")
+        print(f"  cannot detect de-escalation regardless of framing.")
+
+    # Save results
+    model_tag = model.replace(':', '_').replace('-', '_')
+    out_path = out_dir / f"elicitation_{model_tag}_results.json"
+    with open(out_path, 'w') as f:
+        json.dump({
+            'model': model,
+            'n_records': n,
+            'overall_accuracy': correct / n,
+            'de_esc_recall': recall_elicitation,
+            'de_esc_yes': de_esc_yes,
+            'de_esc_no': de_esc_no,
+            'non_de_esc_yes': non_de_esc_yes,
+            'non_de_esc_no': non_de_esc_no,
+            'records': results,
+        }, f, indent=2)
+    print(f"\nSaved to {out_path}")
+    return results
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--input', default='diffs/diff_representations.jsonl')
@@ -730,6 +881,9 @@ def main():
     parser.add_argument('--condition', default='diff',
                         choices=['diff', 'raw', 'both'])
     parser.add_argument('--dry_run', action='store_true')
+    parser.add_argument('--elicitation', action='store_true',
+                        help='Run adversarial elicitation test instead of ICL CV. '
+                             'Asks YES/NO: has risk disclosure been reduced?')
     args = parser.parse_args()
 
     out_dir = Path(args.output)
@@ -742,6 +896,10 @@ def main():
         train = records[6:]
         test = records[0]
         print(build_prompt(test, train, 3, 'diff', args.model)[:3500])
+        return
+
+    if args.elicitation:
+        run_elicitation(records, args.model, out_dir)
         return
 
     if not OLLAMA_AVAILABLE and not args.model.startswith('gpt-'):
