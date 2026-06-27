@@ -1,0 +1,341 @@
+FINANCIAL DISCLOSURE RISK INTELLIGENCE SYSTEM
+Human Annotation Tracker - Final
+================================================
+Total usable annotations: 16 (entries 5, 6, 7 are insufficient_text)
+Last updated: 2026-06-13
+================================================
+
+1.
+PAIR:      VLO_10-K_2021_2022
+DIMENSION: credit_risk
+TICKER:    VLO | 2021 -> 2022
+
+direction  : de-escalating
+intensity  : 3
+confident  : yes
+reason     : 2021 filing leads with dedicated COVID section naming explicit
+             counterparty default risk; 2022 filing moves COVID to embedded
+             section and removes specific counterparty obligation language
+
+------------------------------------------------
+
+2.
+PAIR:      CINF_10-K_2020_2021
+DIMENSION: regulatory_risk
+TICKER:    CINF | 2020 -> 2021
+
+direction  : stable
+intensity  : 2
+confident  : yes
+reason     : Both filings contain the same core regulatory risk language:
+             NAIC/state regulator re-examination, potential new restrictions,
+             rate-setting constraints, federal oversight concerns via
+             Dodd-Frank, and UK/EU regulatory exposure for Cincinnati Global.
+             The 2021 filing adds the FCPA reference explicitly in the
+             Regulation section, which is a minor escalation, but the overall
+             regulatory risk section is substantively unchanged in scope, tone,
+             and structure. No sections removed; no softening of compliance
+             burden language.
+
+------------------------------------------------
+
+3.
+PAIR:      CINF_10-K_2021_2022
+DIMENSION: regulatory_risk
+TICKER:    CINF | 2021 -> 2022
+
+direction  : stable
+intensity  : 1
+confident  : yes
+reason     : Regulatory risk sections are structurally and substantively
+             identical across both filings; same state/federal framework,
+             same agencies, same NAIC discussion with no material softening
+             or escalation
+
+------------------------------------------------
+
+4.
+PAIR:      FITB_10-K_2022_2023
+DIMENSION: regulatory_risk
+TICKER:    FITB | 2022 -> 2023
+
+direction  : escalating
+intensity  : 2
+confident  : yes
+reason     : Later filing adds new regulatory risk items not present earlier
+             (SEC climate disclosure requirements, Inflation Reduction Act,
+             fair lending scrutiny) while retaining all prior concerns
+
+------------------------------------------------
+
+5.
+PAIR:      MPC_10-K_2019_2020
+DIMENSION: credit_risk
+TICKER:    MPC | 2019 -> 2020
+
+direction  : insufficient_text
+intensity  : 1
+confident  : no
+reason     : Document excerpts contain only business overview and operational
+             sections; the Item 1A Risk Factors credit_risk language is not
+             present in the pasted content
+
+------------------------------------------------
+
+6.
+PAIR:      MPC_10-K_2020_2021
+DIMENSION: credit_risk
+TICKER:    MPC | 2020 -> 2021
+
+direction  : insufficient_text
+intensity  : 1
+confident  : no
+reason     : Document excerpts contain only business overview and operational
+             sections; the Item 1A Risk Factors credit_risk section is not
+             present in the pasted content
+
+------------------------------------------------
+
+7.
+PAIR:      MPC_10-K_2022_2023
+DIMENSION: regulatory_risk
+TICKER:    MPC | 2022 -> 2023
+
+direction  : insufficient_text
+intensity  : 1
+confident  : no
+reason     : Document excerpts contain only business overview and operational
+             sections; the Item 1A Risk Factors regulatory_risk section is not
+             present in the pasted content
+
+------------------------------------------------
+
+8.
+PAIR:      TWLO_10-K_2019_2020
+DIMENSION: credit_risk
+TICKER:    TWLO | 2019 -> 2020
+
+direction  : stable
+intensity  : 1
+confident  : yes
+reason     : All credit-related sections (counterparty risk on capped calls,
+             credit card fraud, accounts receivable collection) are structurally
+             and substantively identical across both filings; no material
+             softening or escalation of credit risk language
+
+------------------------------------------------
+
+9.
+PAIR:      ZS_10-K_2020_2021
+DIMENSION: credit_risk
+TICKER:    ZS | 2020 -> 2021
+
+direction  : stable
+intensity  : 1
+confident  : yes
+reason     : All credit-related sections (channel partner end-customer credit
+             risk, capped call counterparty risk, accounts receivable
+             collection) are structurally and substantively identical across
+             both filings; no material change in credit risk language or
+             framing
+
+------------------------------------------------
+
+10.
+PAIR:      FANG_10-K_2019_2020
+DIMENSION: operational_risk
+TICKER:    FANG | 2019 -> 2020
+
+direction  : escalating
+intensity  : 1
+confident  : yes
+reason     : 2020 filing adds standalone COVID operational risk section and
+             new Biden administration regulatory uncertainty language not
+             present in 2019; insurance improvements (cyber coverage added,
+             well protection expanded) partially offset but do not outweigh
+             the aggregate new risk additions
+
+------------------------------------------------
+
+11.
+PAIR:      FANG_10-K_2021_2022
+DIMENSION: operational_risk
+TICKER:    FANG | 2021 -> 2022
+
+direction  : escalating
+intensity  : 1
+confident  : yes
+reason     : Later filing adds a new standalone risk section on Texas Railroad
+             Commission produced water disposal restrictions and seismic
+             activity moratoriums in the Permian Basin not present in the
+             earlier filing, while core operational hazard and insurance
+             language remains unchanged
+
+------------------------------------------------
+
+12.
+PAIR:      FANG_10-K_2022_2023
+DIMENSION: operational_risk
+TICKER:    FANG | 2022 -> 2023
+
+direction  : escalating
+intensity  : 2
+confident  : yes
+reason     : Cyber risk section dramatically expanded with detailed attack
+             scenario catalog; new joint venture, land/right-of-way, IRA
+             methane fee, ESG litigation, and sustainability target sections
+             added; minor de-escalation from well protection coverage
+             expanding from selected to all wells does not offset the
+             aggregate escalation
+
+------------------------------------------------
+
+13.
+PAIR:      HUBS_10-K_2021_2022
+DIMENSION: operational_risk
+TICKER:    HUBS | 2021 -> 2022
+
+direction  : escalating
+intensity  : 1
+confident  : yes
+reason     : Later filing adds new Payments product operational risk section,
+             specifically names prior supply chain attacks, and expands AWS
+             concentration risk language, while COVID risk is materially
+             softened but does not fully offset the new risk categories added
+
+------------------------------------------------
+
+14.
+PAIR:      AIZ_10-K_2019_2020
+DIMENSION: operational_risk
+TICKER:    AIZ | 2019 -> 2020
+
+direction  : escalating
+intensity  : 1
+confident  : yes
+reason     : 2020 filing adds a new standalone Brexit risk section not present
+             in 2019, explicitly names U.S.-China trade risk for mobile device
+             values, adds pandemic language to the macroeconomic conditions
+             risk list, and adds franchise partner brand risk under joint
+             ventures; core operational hazard and cyber sections remain
+             largely stable with no material de-escalating offsets
+
+------------------------------------------------
+
+15.
+PAIR:      CINF_10-K_2022_2023
+DIMENSION: credit_risk
+TICKER:    CINF | 2022 -> 2023
+
+direction  : escalating
+intensity  : 2
+confident  : yes
+reason     : Later filing adds new concrete credit risk drivers not present
+             earlier (tightening credit markets, inflationary pressures,
+             supply chain disruptions) with specific 2022 experience cited;
+             reinsurer credit risk section also expands concerns about
+             insolvency timing
+
+------------------------------------------------
+
+16.
+PAIR:      EOG_10-K_2019_2020
+DIMENSION: credit_risk
+TICKER:    EOG | 2019 -> 2020
+
+direction  : stable
+intensity  : 1
+confident  : yes
+reason     : Customer and counterparty credit risk section is verbatim
+             identical across both filings; no new credit risk factors added
+             or removed, despite broader macro deterioration in 2020
+
+------------------------------------------------
+
+17.
+PAIR:      LYFT_10-K_2021_2022
+DIMENSION: operational_risk
+TICKER:    LYFT | 2021 -> 2022
+
+direction  : de-escalating
+intensity  : 2
+confident  : yes
+reason     : 2021 filing has a detailed 8-bullet COVID operational risk section
+             naming specific disruptions (shared rides paused, Lyft Rentals
+             closures, Flexdrive fee waivers, Light Vehicle supply delays);
+             2022 filing condenses this to 5 bullets, removes specific program
+             disruption details, and softens tense from ongoing crisis to
+             residual uncertainty, indicating meaningful normalization of
+             COVID-specific operational risk language
+
+------------------------------------------------
+
+18.
+PAIR:      UBER_10-K_2021_2022
+DIMENSION: operational_risk
+TICKER:    UBER | 2021 -> 2022
+
+direction  : de-escalating
+intensity  : 2
+confident  : yes
+reason     : 2021 summary leads with COVID-19 as the first risk bullet under a
+             dedicated "General Economic Risks" section framing it as an active
+             ongoing impact; 2022 summary removes COVID from the top position,
+             deprioritizes it to near the bottom of the list, and reframes
+             language from current adverse impact to hypothetical future
+             outbreak risk, indicating meaningful normalization of COVID
+             operational risk prominence
+
+------------------------------------------------
+
+19.
+PAIR:      ZM_10-K_2021_2022
+DIMENSION: operational_risk
+TICKER:    ZM | 2021 -> 2022
+
+direction  : de-escalating
+intensity  : 3
+confident  : yes
+reason     : 2021 summary contains two dedicated COVID operational risk bullets:
+             one citing unprecedented platform usage due to the pandemic and
+             expected user growth slowdown as vaccines roll out, and one citing
+             COVID-driven increased data center load as a specific outage risk;
+             2022 summary removes both COVID bullets entirely and strips the
+             pandemic reference from the data center risk factor, indicating
+             full normalization of COVID as a named operational risk driver
+
+================================================
+CLASS DISTRIBUTION (usable annotations only, n=16)
+================================================
+
+de-escalating : 4  (entries 1, 17, 18, 19)
+stable        : 5  (entries 2, 3, 8, 9, 16)
+escalating    : 7  (entries 4, 10, 11, 12, 13, 14, 15)
+
+CORRECTED FINAL COUNT:
+de-escalating : 4
+stable        : 5
+escalating    : 7
+insufficient  : 3 (excluded from usable)
+total usable  : 16
+
+================================================
+DIMENSION BREAKDOWN (usable only)
+================================================
+credit_risk     : 6  (entries 1, 8, 9, 15, 16 + 1 de-escalating VLO)
+regulatory_risk : 3  (entries 2, 3, 4)
+operational_risk: 7  (entries 10, 11, 12, 13, 14, 17, 18, 19)
+
+================================================
+NOTES FOR METHODOLOGY
+================================================
+- Entries 5, 6, 7 (MPC pairs) excluded from analysis: EDGAR extractions
+  returned business section only, not Item 1A Risk Factors content.
+- Entry 10 (FANG 2019->2020): confirmed escalating after full text review;
+  earlier session annotation of de-escalating was incorrect.
+- Entry 14 (AIZ 2019->2020): confirmed escalating after full text review;
+  earlier session annotation of de-escalating was incorrect.
+- Entry 21 in raw annotation sheet was a duplicate of entry 14 with incorrect
+  direction; superseded by entry 14 final annotation above.
+- Entry 20 in raw annotation sheet was a duplicate of entry 1; removed.
+================================================
