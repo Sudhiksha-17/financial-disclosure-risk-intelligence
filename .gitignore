@@ -33,4 +33,52 @@ outputs/
 .DS_Store
 
 # Jupyter
-.ipynb_checkpoints/
+.ipynb_checkpoints/# working directories
+deescalating_v7/
+deescalating_v8/
+deescalating_v9/
+extracted_full/
+extracted_missing/
+annotation_candidates/
+deescalating_candidates/
+
+# intermediate annotation files
+annotations_final_v2.txt
+annotations_final_v3.txt
+candidates_to_annotate.txt
+
+# superseded scripts
+icl_baseline.py
+icl_baseline_v2.py
+
+# data files too large or sensitive
+diffs/
+extracted_full/
+
+# python
+__pycache__/
+*.pyc
+.env
+
+# working directories
+deescalating_v7/
+deescalating_v8/
+deescalating_v9/
+extracted_full/
+extracted_missing/
+annotation_candidates/
+deescalating_candidates/
+
+# intermediate annotation files
+annotations_final_v2.txt
+annotations_final_v3.txt
+candidates_to_annotate.txt
+
+# superseded scripts
+icl_baseline.py
+icl_baseline_v2.py
+
+# python
+__pycache__/
+*.pyc
+.env
