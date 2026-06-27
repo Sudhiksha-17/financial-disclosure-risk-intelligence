@@ -65,10 +65,11 @@ LABEL2ID = {'de-escalating': 0, 'stable': 1, 'escalating': 2}
 ID2LABEL = {0: 'de-escalating', 1: 'stable', 2: 'escalating'}
 
 # ── reframed diff summary ──────────────────────────────────────────────────────
-def reframe_diff_summary(diff, pair_id=''):
+def reframe_diff_summary(diff, pair_id='', is_test=False):
     """
     Convert raw diff signals into LLM-interpretable language for Llama3.
     pair_id passed separately since it lives at record level not diff level.
+    is_test=True strips tiebreaker notes to prevent leakage in evaluation.
     """
     parts = []
     stats = diff.get('stats', {})
@@ -168,7 +169,7 @@ def reframe_diff_summary(diff, pair_id=''):
         'JBLU_10-K_2021_2022',  # Spirit merger attempt: 8 new dedicated merger risk bullets
         'FANG_10-K_2022_2023',  # IRA methane fee + cyber expansion, non-COVID escalation
     }
-    if pair_id in KNOWN_TIEBREAKER_PAIRS and len(covid_removed) > len(covid_added):
+    if pair_id in KNOWN_TIEBREAKER_PAIRS and len(covid_removed) > len(covid_added) and not is_test:
         parts.append(f"TIEBREAKER SIGNAL: COVID language reduced but substantial new "
                     f"non-COVID risk content added (merger costs, regulatory changes, "
                     f"or new risk categories) — net effect is escalating "
@@ -229,12 +230,11 @@ DECISION RULES using KEY SIGNALS:
 Respond with exactly one word: de-escalating, stable, or escalating"""
 
 # ── Clean diff formatter for GPT-4o (no annotation tags) ─────────────────────
-def reframe_diff_summary_gpt4o(diff, pair_id=''):
+def reframe_diff_summary_gpt4o(diff, pair_id='', is_test=False):
     """
     Clean analytical diff summary for GPT-4o.
     No [SIGNAL: xxx] tags — GPT-4o processes analytically without scaffolding.
-    Presents facts clearly and lets the model reason.
-    pair_id passed separately since it lives at record level not diff level.
+    is_test=True strips tiebreaker notes to prevent leakage in evaluation.
     """
     parts = []
     stats = diff.get('stats', {})
@@ -323,7 +323,7 @@ def reframe_diff_summary_gpt4o(diff, pair_id=''):
     KNOWN_TIEBREAKER_PAIRS = {
         'WBD_10-K_2021_2022', 'JBLU_10-K_2021_2022', 'FANG_10-K_2022_2023',
     }
-    if pair_id in KNOWN_TIEBREAKER_PAIRS:
+    if pair_id in KNOWN_TIEBREAKER_PAIRS and not is_test:
         parts.append(f"Note: Despite COVID language reduction, substantial new "
                     f"non-COVID risk content was added (merger costs, regulatory changes). "
                     f"Net directional change is escalating.")
@@ -424,7 +424,7 @@ def build_prompt(test_record, examples, n_shots, condition, model='llama3:latest
 
     for i, ex in enumerate(selected):
         if condition == 'diff':
-            content = diff_formatter(ex['diff'], ex.get('pair_id', ''))
+            content = diff_formatter(ex['diff'], ex.get('pair_id', ''), is_test=False)
         else:
             earlier = " ".join(ex['diff'].get('removed_sentences', [])[:3])[:400]
             later = " ".join(ex['diff'].get('added_sentences', [])[:3])[:400]
@@ -436,7 +436,7 @@ def build_prompt(test_record, examples, n_shots, condition, model='llama3:latest
     parts.append("--- CLASSIFY THIS ---\n")
 
     if condition == 'diff':
-        content = diff_formatter(test_record['diff'], test_record.get('pair_id', ''))
+        content = diff_formatter(test_record['diff'], test_record.get('pair_id', ''), is_test=True)
     else:
         earlier = " ".join(test_record['diff'].get('removed_sentences', [])[:3])[:400]
         later = " ".join(test_record['diff'].get('added_sentences', [])[:3])[:400]
