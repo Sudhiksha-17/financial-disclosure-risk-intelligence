@@ -21,9 +21,10 @@ It mirrors and automates a core workflow performed manually by credit analysts a
 | De-escalating recall — LLM baseline | 0/20 (0%) |
 | De-escalating recall — ICL diff, Llama3 8B (corrected) | **19/20 (95%)** |
 | De-escalating recall — ICL diff, GPT-4 (corrected) | 11/20 (55%) |
-| GPT-4 ICL diff balanced accuracy | 0.713 |
-| GPT-4 direct elicitation balanced accuracy | 0.519 |
-| Elicitation vs ICL delta | +0.194 (threshold-independent, genuine discrimination improvement) |
+| GPT-4 multiclass balanced accuracy (ICL diff, corrected) | 0.448 |
+| GPT-4 binary (de-esc vs not) balanced accuracy — ICL diff | 0.713 |
+| GPT-4 binary (de-esc vs not) balanced accuracy — direct elicitation | 0.519 |
+| Elicitation vs ICL delta (binary, same-basis comparison) | +0.194 (threshold-independent, genuine discrimination improvement) |
 | Diff primary signal alignment with human labels | 84.2% (32/38) |
 | Panel OLS β — credit risk escalation | +0.032 (p=0.028) |
 | Panel OLS β — regulatory risk escalation | +0.038 (p=0.046) |
@@ -32,7 +33,7 @@ It mirrors and automates a core workflow performed manually by credit analysts a
 
 1. **Llama3 8B diff representation (robust, post-leakage-fix):** Kappa 0.603, CI [0.363, 0.817], de-escalating recall 95% (19/20). The diff representation eliminates de-escalation blindness.
 
-2. **GPT-4 ICL outperforms direct elicitation:** ICL diff balanced accuracy 0.713 vs direct elicitation 0.519, delta +0.194. Confirmed threshold-independent — the structured representation does real cognitive work, not just threshold shifting.
+2. **GPT-4 ICL outperforms direct elicitation (binary de-escalation task):** Both comparisons are framed as binary (de-escalation vs not). ICL diff binary balanced accuracy 0.713 vs direct elicitation binary balanced accuracy 0.519, delta +0.194. Same-basis comparison, confirmed threshold-independent. GPT-4 diff multiclass balanced accuracy is 0.448; the 0.713 is specifically the binary de-esc vs not metric. The model does not know de-escalation happened — structured decomposition does real cognitive work.
 
 **Retracted:** Cross-model kappa comparisons. CI overlap at n=36 means Llama3 8B [0.363, 0.817] vs GPT-4 [0.000, 0.417] cannot be claimed as a reliable performance gap. Reported as null.
 
@@ -71,7 +72,13 @@ Key findings from multi-model ablation:
 
 **Finding 3:** Prompt-representation co-design determines the ceiling. Llama3 8B with a prompt tuned over 23 engineering iterations reaches 0.603. The diff representation concept generalizes; specific prompt engineering does not transfer across models.
 
-**Finding 4 (elicitation):** GPT-4 ICL diff (balanced accuracy 0.713) genuinely outperforms direct elicitation (0.519), delta +0.194, confirmed threshold-independent. The model does not know de-escalation happened — structured decomposition does real cognitive work.
+**Finding 4 (elicitation):** GPT-4 ICL diff binary (de-esc vs not) balanced accuracy 0.713 genuinely outperforms direct elicitation binary balanced accuracy 0.519, delta +0.194, same-basis comparison, confirmed threshold-independent. GPT-4 diff multiclass balanced accuracy is 0.448; the elicitation comparison uses the binary metric for both sides. The model does not know de-escalation happened — structured decomposition does real cognitive work.
+
+**Multiclass balanced accuracy by condition (from bootstrap_ci.py):**
+- Llama3 8B diff (corrected): 0.682
+- GPT-4o diff + KEY SIGNALS: 0.526
+- GPT-4 raw: 0.486
+- GPT-4 diff (corrected): 0.448
 
 ## System Architecture
 
@@ -151,15 +158,15 @@ Hypothesis: Risk escalation signals predict post-filing abnormal returns
 ## Analysis Findings
 
 ### Key Result 1: Diff Representation Eliminates De-escalation Blindness (Llama3 8B)
-The original LLM baseline had de-escalating recall of 0/20 (0%). The diff representation with Llama3-specific prompting achieves 19/20 (95%) while improving kappa from 0.207 to 0.603 (post-leakage-fix).
+The original LLM baseline had de-escalating recall of 0/20 (0%). The diff representation with Llama3-specific prompting achieves 19/20 (95%) de-escalating recall, stable recall 3/7 (42.9%), escalating recall 6/9 (66.7%), kappa 0.603, multiclass balanced accuracy 0.682 (post-leakage-fix).
 
 Confusion matrix — ICL diff 3-shot, Llama3 8B, corrected (rows=true, cols=predicted):
 
 ```
                      de-escalating   stable   escalating
   de-escalating             19          0           1
-  stable                     2          3           2
-  escalating                 2          0           7
+  stable                     1          3           3
+  escalating                 3          0           6
 ```
 
 ### Key Result 2: Three Failure Modes Across Model Families
@@ -209,15 +216,15 @@ A three-vector leakage audit was completed after consultant feedback. This is th
 See `leakage_audit.py` for the full audit and `bootstrap_ci.py` for corrected CIs.
 
 ### Key Result 7: Elicitation vs ICL Comparison
-Asking GPT-4 directly "has risk disclosure been reduced?" (YES/NO elicitation) vs running the ICL diff classification task:
+Asking GPT-4 directly "has risk disclosure been reduced?" (YES/NO elicitation) vs running the ICL diff classification task. Both comparisons use the **binary (de-escalation vs not) balanced accuracy** — the same metric, same task framing, making the delta valid and threshold-independent. GPT-4 diff multiclass balanced accuracy (across all three classes) is 0.448; the 0.713 below is specifically the binary de-esc vs not metric.
 
-| Method | Balanced Accuracy | De-esc Recall | Specificity |
+| Method | Binary BA (de-esc vs not) | De-esc Recall | Non-de-esc Recall |
 |---|---|---|---|
 | Direct elicitation | 0.519 | 0.350 (7/20) | 0.688 (11/16) |
-| ICL diff (corrected) | 0.713 | 0.550 (11/20) | 0.875 |
+| ICL diff (corrected) | 0.713 | 0.550 (11/20) | 0.875 (14/16) |
 | Delta | +0.194 | +0.200 | +0.187 |
 
-The delta is threshold-independent (balanced accuracy), confirming genuine discrimination improvement, not a threshold shift. The model does not know de-escalation happened when asked directly — the structured diff representation and decomposed reasoning do real cognitive work.
+Both sides are binary balanced accuracy on the identical task framing. The delta is threshold-independent, confirming genuine discrimination improvement, not a threshold shift. The model does not know de-escalation happened when asked directly — the structured diff representation and decomposed reasoning do real cognitive work.
 
 **Connection to omission monitoring:** This result directly motivated the successor study. If GPT-4 cannot detect de-escalation even when asked directly, and structured decomposition helps — what happens when the reference document is removed entirely? The omission monitoring project answered that question with a pre-registered, held-out experiment. The answer: monitors fail open, not closed. See [github.com/Sudhiksha-17/omission-monitoring](https://github.com/Sudhiksha-17/omission-monitoring).
 
